@@ -114,7 +114,7 @@ const (
 	//
 	// The P is owned by the idle list or by whatever is
 	// transitioning its state. Its run queue is empty.
-	_Pidle = iota
+	_Pidle = iota // 注释：P的空闲状态
 
 	// _Prunning means a P is owned by an M and is being used to
 	// run user code or the scheduler. Only the M that owns this P
@@ -123,7 +123,7 @@ const (
 	// do), _Psyscall (when entering a syscall), or _Pgcstop (to
 	// halt for the GC). The M may also hand ownership of the P
 	// off directly to another M (e.g., to schedule a locked G).
-	_Prunning
+	_Prunning // 注释：P运行中的状态
 
 	// _Psyscall means a P is not running user code. It has
 	// affinity to an M in a syscall but is not owned by it and
@@ -135,7 +135,7 @@ const (
 	// an M successfully CASes its original P back to _Prunning
 	// after a syscall, it must understand the P may have been
 	// used by another M in the interim.
-	_Psyscall
+	_Psyscall // 注释：P系统调用状态
 
 	// _Pgcstop means a P is halted for STW and owned by the M
 	// that stopped the world. The M that stopped the world
@@ -145,7 +145,7 @@ const (
 	//
 	// The P retains its run queue and startTheWorld will restart
 	// the scheduler on Ps with non-empty run queues.
-	_Pgcstop // 注释：GC停止世界（STW）时把当前的P也停止了，并设置这个状态
+	_Pgcstop // 注释：(STW时停止P，包括系统调用时也会停止)GC停止世界（STW）时把当前的P也停止了，并设置这个状态
 
 	// _Pdead means a P is no longer used (GOMAXPROCS shrank). We
 	// reuse Ps if GOMAXPROCS increases. A dead P is mostly
@@ -192,7 +192,7 @@ type note struct {
 	// Futex-based impl treats it as uint32 key,
 	// while sema-based impl as M* waitm.
 	// Used to be a union, but unions break precise GC.
-	key uintptr // 注释：这里的值是【0或1或*M】0什么都不做，1已经是唤醒的状态，*M待唤醒的M指针
+	key uintptr // 注释：这里的值是【0或1或*M】0什么都不做，1表示已经是唤醒状态，*M待唤醒的M指针
 }
 
 type funcval struct {
@@ -442,8 +442,8 @@ type g struct {
 	_defer       *_defer        // 注释：当前G的延迟调用的数据指针(单向链表，deferreturn会获取链表数据) // innermost defer
 	m            *m             // 注释：当前G绑定的M指针（此g正在被哪个工作线程执行） // current m; offset known to arm liblink
 	sched        gobuf          // 注释：协成执行现场数据(调度信息)，G状态(atomicstatus)变更时，都需要保存当前G的上下文和寄存器等信息。保存协成切换中切走时的寄存器等数据
-	syscallsp    uintptr        // 注释：如果G的状态为Gsyscall，值为sched.sp主要用于GC期间 // if status==Gsyscall, syscallsp = sched.sp to use during gc
-	syscallpc    uintptr        // 注释：如果G的状态为GSyscall，值为sched.pc主要用于GC期间 // if status==Gsyscall, syscallpc = sched.pc to use during gc
+	syscallsp    uintptr        // 注释：如果G的状态为Gsyscall(系统调用时的PC值)，值为sched.sp主要用于GC期间 // if status==Gsyscall, syscallsp = sched.sp to use during gc
+	syscallpc    uintptr        // 注释：如果G的状态为GSyscall(系统调用时SPP值)，值为sched.pc主要用于GC期间 // if status==Gsyscall, syscallpc = sched.pc to use during gc
 	stktopsp     uintptr        // 注释：期望sp位于栈顶，用于回源跟踪 // expected sp at top of stack, to check in traceback
 	param        unsafe.Pointer // 注释：wakeup唤醒时候传递的参数，睡眠时其他g可以设置param，唤醒时该g可以获取，例如调用ready() // passed parameter on wakeup
 	atomicstatus uint32         // 注释：当前G的状态，例如：_Gidle:0;_Grunnable:1;_Grunning:2;_Gsyscall:3;_Gwaiting:4 等
@@ -477,7 +477,7 @@ type g struct {
 	parkingOnChan uint8 // 注释：1表示G放在管道读取队列（c.recvq）或写入队列（c.sendq）里。用于栈的收缩，是一个布尔值，但是原子性更新
 
 	raceignore     int8     // ignore race detection events
-	sysblocktraced bool     // StartTrace has emitted EvGoInSyscall about this goroutine
+	sysblocktraced bool     // 注释：（系统调用时为true,其他情况为false）标记开始系统调用的栈追踪 // StartTrace has emitted EvGoInSyscall about this goroutine
 	sysexitticks   int64    // cputicks when syscall has returned (for tracing)
 	traceseq       uint64   // trace event sequencer
 	tracelastp     puintptr // last P emitted an event for this goroutine
@@ -529,12 +529,12 @@ type m struct {
 	caughtsig     guintptr // goroutine running during fatal signal
 	p             puintptr // 注释：记录与当前工作线程绑定的p结构体对象 // attached p for executing go code (nil if not executing go code)
 	nextp         puintptr // 注释：新线程m要绑定的p（起始任务函数）(其他的m给新m设置该字段，当新m启动时会和当前字段的p进行绑定),其他M把P抢走后会设置这个字段告诉当前M如果执行时应该绑定其他的P
-	oldp          puintptr // the p that was attached before executing a syscall
+	oldp          puintptr // 注释：在系统调用的时候把当前的P存放到这里，系统调用结束后拿出来 // the p that was attached before executing a syscall // 注释：在执行系统调用之前附加的p
 	id            int64
 	mallocing     int32
-	throwing      int32
+	throwing      int32  // 注释：-1不要转储完整的堆栈,大于0时:存储完整的堆栈（用于栈追踪使用）
 	preemptoff    string // if != "", keep curg running on this m
-	locks         int32  // 注释：大于0时说明正在g正在被使用，可能用于GC（获取时++，释放是--）
+	locks         int32  // 注释：给M加锁;(禁用抢占)大于0时说明正在g正在被使用，系统调用后置函数的时候有使用（获取时++，释放是--）
 	dying         int32
 	profilehz     int32
 	spinning      bool // 注释：是否自旋，自旋就表示M正在找G来运行，表示当前工作线程m正在试图从其它工作线程m的本地运行队列偷取g // m is out of work and is actively looking for work
@@ -545,7 +545,7 @@ type m struct {
 	freeWait      uint32    // if == 0, safe to free g0 and delete m (atomic)
 	fastrand      [2]uint32 // 注释：(快速随机数时使用)快速随机数的基础数，程序初始化（schedinit）或创建M（allocm）时设置，随机数是基于这两个数计算出来的，计算完成后重新回填到这两个数里
 	needextram    bool
-	traceback     uint8
+	traceback     uint8                         // 注释：堆栈追踪级别（用于栈追踪时使用）
 	ncgocall      uint64                        // 注释：cgo调用的总数 // number of cgo calls in total
 	ncgo          int32                         // 注释：当前cgo调用的数目 // number of cgo calls currently in progress
 	cgoCallersUse uint32                        // if non-zero, cgoCallers in use temporarily
@@ -563,9 +563,9 @@ type m struct {
 	waitlock      unsafe.Pointer                // 注释：等待锁指针
 	waittraceev   byte                          // 注释：等待追踪事件类型
 	waittraceskip int                           // 注释：跳过几层事件追踪的结果（事件追踪结果中从哪一级返回数据，跳过的是不重要的）
-	startingtrace bool
-	syscalltick   uint32
-	freelink      *m // on sched.freem // 注释：对应freem的链表(freelink->sched.freem)
+	startingtrace bool                          // 注释：是否已经开始栈追踪
+	syscalltick   uint32                        // 注释：保存P里的系统调度计数器，P每一次系统调用加1
+	freelink      *m                            // on sched.freem // 注释：对应freem的链表(freelink->sched.freem)
 
 	// mFixup is used to synchronize OS related m state
 	// (credentials etc) use mutex to access. To avoid deadlocks
@@ -665,7 +665,7 @@ type p struct {
 		buf [128]*mspan
 	}
 
-	tracebuf traceBufPtr
+	tracebuf traceBufPtr // 注释：存放栈追踪的栈缓冲区地址
 
 	// traceSweep indicates the sweep events should be traced.
 	// This is used to defer the sweep start event until a span
@@ -715,7 +715,7 @@ type p struct {
 	// TODO: Consider caching this in the running G.
 	wbBuf wbBuf
 
-	runSafePointFn uint32 // if 1, run sched.safePointFn at next safe point
+	runSafePointFn uint32 // 注释：(以避免发生竞争)是否有安全节点检查函数0否1是，如果是1则执行安全节点函数 // if 1, run sched.safePointFn at next safe point // 注释：如果为1，则在下一个安全点运行sched.safePointFn
 
 	// statsSeq is a counter indicating whether this P is currently
 	// writing any stats. Its value is even when not, odd when it is.
@@ -748,6 +748,7 @@ type p struct {
 	pad cpu.CacheLinePad
 }
 
+// 注释：全局变量
 // 注释：调度器结构体对象，记录了调度器的工作状态
 // 注释：记录调度器的状态和g的全局运行队列：
 type schedt struct {
@@ -756,7 +757,7 @@ type schedt struct {
 	lastpoll  uint64 // time of last network poll, 0 if currently polling
 	pollUntil uint64 // time to which current poll is sleeping
 
-	lock mutex // 注释：锁（把局部P加入全局P队列会用到，修改的字段是"runq和runqsize"）
+	lock mutex // 注释：锁（把局部P加入全局P队列会用到，修改的字段是"runq和runqsize"）(系统调用时也会用到)
 
 	// When increasing nmidle, nmidlelocked, nmsys, or nmfreed, be
 	// sure to call checkdead().
@@ -816,11 +817,11 @@ type schedt struct {
 	// m.exited is set. Linked through m.freelink.
 	freem *m
 
-	gcwaiting  uint32 // gc is waiting to run // 注释：GC启动STW时会把gcwaiting=1，等待所有的M停止(休眠),默认是0
-	stopwait   int32  // 注释：停止等待，默认值是P的个数，如果等于0代表所有的P都已经被抢占了。冻结时值为一个很大的值，STW时减1,
-	stopnote   note
-	sysmonwait uint32
-	sysmonnote note
+	gcwaiting  uint32 // 注释：是否需要GC等待，0否1是，默认0（在GC发起后就处于等待阶段，需要把所有的P(P的数量默认是系统核数)都停止后执行GC，GC启动后会设置成1） // gc is waiting to run
+	stopwait   int32  // 注释：停止等待，默认值是P的个数，如果等于0代表所有的P都被停止了(一般用于STW的时候判断是否全部停止了，然后执行后续操作)。冻结(类似于STW，但尽了最大努力，可以叫几次)时值为一个很大的值(const freezeStopWait)，STW时减1,
+	stopnote   note   // 注释：用于处理GC的M节点，当STW把所有的P都停止后唤醒，默认是停止状态
+	sysmonwait uint32 // 注释：(系统监控)是否有等待的M,0否，1是
+	sysmonnote note   // 注释：如果有等待的M，则唤醒M并且把sysmonwait设置为0
 
 	// While true, sysmon not ready for mFixup calls.
 	// Accessed atomically.
@@ -828,9 +829,10 @@ type schedt struct {
 
 	// safepointFn should be called on each P at the next GC
 	// safepoint if p.runSafePointFn is set.
-	safePointFn   func(*p)
-	safePointWait int32
-	safePointNote note
+	// 注释：如果设置了P.runSafePointFn，则应在下一个GC安全点对每个P调用安全点Fn。
+	safePointFn   func(*p) // 注释：执行安全节点函数，把当前P放进去，检查是否有数据冲突（检测数据竞争）
+	safePointWait int32    // 注释：安全节点等待数，默认是 gomaxprocs - 1，执行一个安全节点检查后递减
+	safePointNote note     //  注释：等待被唤醒的节点M，安全节点数safePointWait为0时唤醒
 
 	profilehz int32 // cpu profiling rate
 

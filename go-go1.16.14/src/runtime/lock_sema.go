@@ -1,6 +1,7 @@
 // Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
+// 注释：该文件只在 aix darwin netbsd openbsd plan9 solaris windows 这些系统下编译执行
 
 // +build aix darwin netbsd openbsd plan9 solaris windows
 
@@ -139,6 +140,7 @@ func noteclear(n *note) {
 	}
 }
 
+// 注释：【MacOS系统】唤醒节点M
 func notewakeup(n *note) {
 	var v uintptr
 	for {
@@ -151,14 +153,14 @@ func notewakeup(n *note) {
 	// Successfully set waitm to locked.
 	// What was it before?
 	switch {
-	case v == 0:
+	case v == 0: // 注释：如果是0什么都不做
 		// Nothing was waiting. Done.
-	case v == locked:
+	case v == locked: // 注释：如果是1则代表已经是唤醒的状态了，抛出异常
 		// Two notewakeups! Not allowed.
 		throw("notewakeup - double wakeup")
 	default:
 		// Must be the waiting m. Wake it up.
-		semawakeup((*m)(unsafe.Pointer(v)))
+		semawakeup((*m)(unsafe.Pointer(v))) // 注释：如果是指针则转换成M指针并唤醒M
 	}
 }
 

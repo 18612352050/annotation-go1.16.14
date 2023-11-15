@@ -13,9 +13,9 @@
 // number of arguments and the C-style argv.
 // 注释：程序真正的入口
 TEXT _rt0_amd64(SB),NOSPLIT,$-8
-	MOVQ	0(SP), DI	// argc
-	LEAQ	8(SP), SI	// argv
-	JMP	runtime·rt0_go(SB)
+	MOVQ	0(SP), DI	// 注释：把命令行参数个数放到寄存器DI里 // argc
+	LEAQ	8(SP), SI	// 注释：把命令行参数放到寄存器SI里    // argv
+	JMP	runtime·rt0_go(SB) // 注释：调用runtime·rt0_go函数（汇编语言实现的）
 
 // main is common startup code for most amd64 systems when using
 // external linking. The C startup code will call the symbol "main"
@@ -896,16 +896,16 @@ done:
 	RET                     // 注释：汇编函数返回结束
 
 // func memhash(p unsafe.Pointer, h, s uintptr) uintptr
-// hash function using AES hardware instructions
+// hash function using AES hardware instructions // 注释：使用AES硬件指令的散列函数
 TEXT runtime·memhash(SB),NOSPLIT,$0-32
-	CMPB	runtime·useAeshash(SB), $0
-	JEQ	noaes
-	MOVQ	p+0(FP), AX	// ptr to data
-	MOVQ	s+16(FP), CX	// size
-	LEAQ	ret+24(FP), DX
-	JMP	aeshashbody<>(SB)
+	CMPB	runtime·useAeshash(SB), $0      // 注释：判断runtime·useAeshash(SB)是否等于0
+	JEQ	noaes                               // 注释：如果等于零跳转到noaes
+	MOVQ	p+0(FP), AX	// ptr to data      // 注释：获取指针地址(第一个参数,AMD64系统指针是8字节64位)放到寄存器AX中
+	MOVQ	s+16(FP), CX	// size         // 注释：获取大小(第三个个参数)放到CX寄存器里
+	LEAQ	ret+24(FP), DX                  // 注释：把返回值的内存地址放到DX寄存器里
+	JMP	aeshashbody<>(SB)                   // 注释：执行(跳转到)aeshashbody,跳转时可以访问上面的参数（第二个参数就是在调用函数时使用）
 noaes:
-	JMP	runtime·memhashFallback(SB)
+	JMP	runtime·memhashFallback(SB)         // 注释：执行(跳转到)runtime·memhashFallback
 
 // func strhash(p unsafe.Pointer, h uintptr) uintptr
 TEXT runtime·strhash(SB),NOSPLIT,$0-24
@@ -922,25 +922,27 @@ noaes:
 // AX: data
 // CX: length
 // DX: address to put return value
+// 注释：在执行前内存寄存器里AX表示数据（内存指针），CX是尺寸大小，DX是存放返回的数据指针
+// 注释：执行使用AES计算哈希值
 TEXT aeshashbody<>(SB),NOSPLIT,$0-0
-	// Fill an SSE register with our seeds.
-	MOVQ	h+8(FP), X0			// 64 bits of per-table hash seed
-	PINSRW	$4, CX, X0			// 16 bits of length
-	PSHUFHW $0, X0, X0			// repeat length 4 times total
-	MOVO	X0, X1				// save unscrambled seed
-	PXOR	runtime·aeskeysched(SB), X0	// xor in per-process seed
-	AESENC	X0, X0				// scramble seed
+	// Fill an SSE register with our seeds. // 注释： 用我们的种子填写SSE登记册。
+	MOVQ	h+8(FP), X0			// 64 bits of per-table hash seed   // 注释：(就是上面的第二个参数)每个表的64位散列种子
+	PINSRW	$4, CX, X0			// 16 bits of length                // 注释：长度为16位,将CX中的低位插入到X0中的第4个位置
+	PSHUFHW $0, X0, X0			// repeat length 4 times total      // 注释：重复长度总计4次，（根据X0（第三个参数）中编码对X0（第二个参数）高位进行打乱处理，结果放到0中（丢掉结果））
+	MOVO	X0, X1				// save unscrambled seed            // 注释：保存未处理的种子，到X1中
+	PXOR	runtime·aeskeysched(SB), X0	// xor in per-process seed  // 注释：每个进程种子中的xor
+	AESENC	X0, X0				// scramble seed                    // 注释：打乱种子(执行一轮AES加密流程)
 
-	CMPQ	CX, $16
-	JB	aes0to15
-	JE	aes16
-	CMPQ	CX, $32
-	JBE	aes17to32
-	CMPQ	CX, $64
-	JBE	aes33to64
-	CMPQ	CX, $128
-	JBE	aes65to128
-	JMP	aes129plus
+	CMPQ	CX, $16             // 注释：判断CX寄存器里的值和16相比较
+	JB	aes0to15                // 注释：如果小于则跳转到aes0to15标记
+	JE	aes16                   // 注释：如果等于则跳转aes16标记
+	CMPQ	CX, $32             // 注释：比较CX和32
+	JBE	aes17to32               // 注释：小于等于是跳转到aes17to32标记
+	CMPQ	CX, $64             // 注释：比较CX寄存器和64
+	JBE	aes33to64               // 注释：小于等于时跳转到aes33to64标记
+	CMPQ	CX, $128            // 注释：比较CX寄存器和128
+	JBE	aes65to128              // 注释：小于等于时跳转到aes65to128标记
+	JMP	aes129plus              // 注释：无条件跳转到aes129plus标记
 
 aes0to15:
 	TESTQ	CX, CX

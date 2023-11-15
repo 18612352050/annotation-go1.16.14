@@ -19,7 +19,7 @@ import (
 )
 
 // Event types in the trace, args are given in square brackets.
-// 注释：追踪的事件类型，参数在方括号中给出
+// 注释：(事件类型常量)追踪的事件类型，参数在方括号中给出
 const (
 	traceEvNone              = 0  // unused
 	traceEvBatch             = 1  // start of per-P batch of events [pid, timestamp]
@@ -27,7 +27,7 @@ const (
 	traceEvStack             = 3  // stack [stack id, number of PCs, array of {PC, func string ID, file string ID, line}]
 	traceEvGomaxprocs        = 4  // current value of GOMAXPROCS [timestamp, GOMAXPROCS, stack id]
 	traceEvProcStart         = 5  // start of P [timestamp, thread id]
-	traceEvProcStop          = 6  // stop of P [timestamp]
+	traceEvProcStop          = 6  // 注释：(栈追踪)线程停止事件 // stop of P [timestamp]
 	traceEvGCStart           = 7  // GC start [timestamp, seq, stack id]
 	traceEvGCDone            = 8  // GC done [timestamp]
 	traceEvGCSTWStart        = 9  // GC STW start [timestamp, kind]
@@ -49,9 +49,9 @@ const (
 	traceEvGoBlockSync       = 25 // goroutine blocks on Mutex/RWMutex [timestamp, stack]
 	traceEvGoBlockCond       = 26 // goroutine blocks on Cond [timestamp, stack]
 	traceEvGoBlockNet        = 27 // goroutine blocks on network [timestamp, stack]
-	traceEvGoSysCall         = 28 // syscall enter [timestamp, stack]
+	traceEvGoSysCall         = 28 // 注释：系统栈追踪 // syscall enter [timestamp, stack]
 	traceEvGoSysExit         = 29 // syscall exit [timestamp, goroutine id, seq, real timestamp]
-	traceEvGoSysBlock        = 30 // syscall blocks [timestamp]
+	traceEvGoSysBlock        = 30 // 注释：系统调用停止时的栈追踪 // syscall blocks [timestamp]
 	traceEvGoWaiting         = 31 // denotes that goroutine is blocked when tracing starts [timestamp, goroutine id]
 	traceEvGoInSyscall       = 32 // denotes that goroutine is in syscall when tracing starts [timestamp, goroutine id]
 	traceEvHeapAlloc         = 33 // memstats.heap_live change [timestamp, heap_alloc]
@@ -87,16 +87,16 @@ const (
 	// Tracing won't work reliably for architectures where cputicks is emulated
 	// by nanotime, so the value doesn't matter for those architectures.
 	traceTickDiv = 16 + 48*(sys.Goarch386|sys.GoarchAmd64)
-	// Maximum number of PCs in a single stack trace.
-	// Since events contain only stack id rather than whole stack trace,
-	// we can allow quite large values here.
-	traceStackSize = 128
+	// Maximum number of PCs in a single stack trace. // 注释：单个堆栈跟踪中的最大PC数。
+	// Since events contain only stack id rather than whole stack trace, // 注释：由于事件只包含堆栈id而不是整个堆栈跟踪，
+	// we can allow quite large values here. // 注释：我们可以在这里允许相当大的值。
+	traceStackSize = 128 // 注释：栈追踪数组数据缓冲区（8位（128）个数的指针数组），用来存储栈ID的数组
 	// Identifier of a fake P that is used when we trace without a real P.
-	traceGlobProc = -1
+	traceGlobProc = -1 // 注释：当我们在没有真实P的情况下进行跟踪时使用的伪P的标识符(占位符)。
 	// Maximum number of bytes to encode uint64 in base-128.
 	traceBytesPerNumber = 10
 	// Shift of the number of arguments in the first event byte.
-	traceArgCountShift = 6
+	traceArgCountShift = 6 // 注释：第一个事件字节中参数数量的偏移。
 	// Flag passed to traceGoPark to denote that the previous wakeup of this
 	// goroutine was futile. For example, a goroutine was unblocked on a mutex,
 	// but another goroutine got ahead and acquired the mutex before the first
@@ -107,26 +107,27 @@ const (
 )
 
 // trace is global tracing context.
+// 注释：栈追踪的全局上下文结构体
 var trace struct {
-	lock          mutex       // protects the following members
-	lockOwner     *g          // to avoid deadlocks during recursive lock locks
-	enabled       bool        // when set runtime traces events
-	shutdown      bool        // set when we are waiting for trace reader to finish after setting enabled to false
-	headerWritten bool        // whether ReadTrace has emitted trace header
-	footerWritten bool        // whether ReadTrace has emitted trace footer
-	shutdownSema  uint32      // used to wait for ReadTrace completion
-	seqStart      uint64      // sequence number when tracing was started
-	ticksStart    int64       // cputicks when tracing was started
-	ticksEnd      int64       // cputicks when tracing was stopped
-	timeStart     int64       // nanotime when tracing was started
-	timeEnd       int64       // nanotime when tracing was stopped
-	seqGC         uint64      // GC start/done sequencer
-	reading       traceBufPtr // buffer currently handed off to user
-	empty         traceBufPtr // stack of empty buffers
-	fullHead      traceBufPtr // queue of full buffers
-	fullTail      traceBufPtr
+	lock          mutex           // protects the following members
+	lockOwner     *g              // 注释：主G地址 // to avoid deadlocks during recursive lock locks // 注释：在递归锁期间避免死锁
+	enabled       bool            // 注释：是否开启栈追踪 // when set runtime traces events
+	shutdown      bool            // set when we are waiting for trace reader to finish after setting enabled to false
+	headerWritten bool            // whether ReadTrace has emitted trace header
+	footerWritten bool            // whether ReadTrace has emitted trace footer
+	shutdownSema  uint32          // used to wait for ReadTrace completion
+	seqStart      uint64          // sequence number when tracing was started
+	ticksStart    int64           // cputicks when tracing was started
+	ticksEnd      int64           // cputicks when tracing was stopped
+	timeStart     int64           // nanotime when tracing was started
+	timeEnd       int64           // nanotime when tracing was stopped
+	seqGC         uint64          // GC start/done sequencer
+	reading       traceBufPtr     // buffer currently handed off to user
+	empty         traceBufPtr     // 注释：空缓冲区堆栈 // stack of empty buffers
+	fullHead      traceBufPtr     // 注释：缓冲区已满时的缓冲区地址队列的头部 // queue of full buffers
+	fullTail      traceBufPtr     // 注释：缓冲区队列的尾部地址对象
 	reader        guintptr        // goroutine that called ReadTrace, or nil
-	stackTab      traceStackTable // maps stack traces to unique ids
+	stackTab      traceStackTable // maps stack traces to unique ids // 注释：将堆栈跟踪映射到唯一id
 
 	// Dictionary for traceEvString.
 	//
@@ -141,16 +142,16 @@ var trace struct {
 	// markWorkerLabels maps gcMarkWorkerMode to string ID.
 	markWorkerLabels [len(gcMarkWorkerModeStrings)]uint64
 
-	bufLock mutex       // protects buf
-	buf     traceBufPtr // global trace buffer, used when running without a p
+	bufLock mutex       // 注释：栈追踪锁(exitsyscall中跟踪期间StartTrace/StopTrace的争用通过在traceLockBuffer中锁定trace.bufLock来解决) // protects buf
+	buf     traceBufPtr // 注释：全局跟踪缓冲区，在没有p的情况下运行时使用 // global trace buffer, used when running without a p
 }
 
 // traceBufHeader is per-P tracing buffer.
 type traceBufHeader struct {
-	link      traceBufPtr             // in trace.empty/full
-	lastTicks uint64                  // when we wrote the last event
-	pos       int                     // next write offset in arr
-	stk       [traceStackSize]uintptr // scratch buffer for traceback
+	link      traceBufPtr             // 注释：记录的缓冲区地址对象 in trace.empty/full
+	lastTicks uint64                  // 注释：当我们写最后一个事件的时间 // when we wrote the last event
+	pos       int                     // 注释：arr中的下一个写入偏移下标 // next write offset in arr
+	stk       [traceStackSize]uintptr // 注释：栈追踪数组数据缓冲区(用来存储栈ID的数组)（8位（128）个数的指针数组）scratch buffer for traceback
 }
 
 // traceBuf is per-P tracing buffer.
@@ -158,7 +159,7 @@ type traceBufHeader struct {
 //go:notinheap
 type traceBuf struct {
 	traceBufHeader
-	arr [64<<10 - unsafe.Sizeof(traceBufHeader{})]byte // underlying buffer for traceBufHeader.buf
+	arr [64<<10 - unsafe.Sizeof(traceBufHeader{})]byte // 注释：traceBufHeader.buf的基础缓冲区 // underlying buffer for traceBufHeader.buf
 }
 
 // traceBufPtr is a *traceBuf that is not traced by the garbage
@@ -168,7 +169,7 @@ type traceBuf struct {
 // this is necessary.
 //
 // TODO: Since traceBuf is now go:notinheap, this isn't necessary.
-type traceBufPtr uintptr
+type traceBufPtr uintptr // 栈追踪的全局缓冲区地址
 
 func (tp traceBufPtr) ptr() *traceBuf   { return (*traceBuf)(unsafe.Pointer(tp)) }
 func (tp *traceBufPtr) set(b *traceBuf) { *tp = traceBufPtr(unsafe.Pointer(b)) }
@@ -484,7 +485,7 @@ func traceProcFree(pp *p) {
 	unlock(&trace.lock)
 }
 
-// traceFullQueue queues buf into queue of full buffers.
+// traceFullQueue queues buf into queue of full buffers. // 注释：traceFullQueue将buf排队到缓冲区已满的队列中。
 func traceFullQueue(buf traceBufPtr) {
 	buf.ptr().link = 0
 	if trace.fullHead == 0 {
@@ -510,30 +511,41 @@ func traceFullDequeue() traceBufPtr {
 }
 
 // traceEvent writes a single event to trace buffer, flushing the buffer if necessary.
-// ev is event type.
+// 注释：traceEvent将单个事件写入跟踪缓冲区，必要时刷新缓冲区。
+// ev is event type. // 注释：ev是事件类型。
 // If skip > 0, write current stack id as the last argument (skipping skip top frames).
+// 注释：如果skip>0，则写入当前堆栈id作为最后一个参数（跳过顶部帧）。
 // If skip = 0, this event type should contain a stack, but we don't want
 // to collect and remember it for this particular call.
+// 注释：如果skip=0，则此事件类型应该包含一个堆栈，但我们不希望为该特定调用收集并记住它。
+//
+// 注释：栈追踪事件
 func traceEvent(ev byte, skip int, args ...uint64) {
-	mp, pid, bufp := traceAcquireBuffer()
+	mp, pid, bufp := traceAcquireBuffer() // 注释：获取当前G的M；M对应P的ID；全局栈追踪的缓冲区地址的指针(对象)
 	// Double-check trace.enabled now that we've done m.locks++ and acquired bufLock.
+	// 注释：仔细检查trace.enabled，因为我们已经完成了m.locks++并获得了bufLock。
 	// This protects from races between traceEvent and StartTrace/StopTrace.
+	// 注释：这可以防止traceEvent和StartTrace/StopTrace之间的竞争。
 
 	// The caller checked that trace.enabled == true, but trace.enabled might have been
 	// turned off between the check and now. Check again. traceLockBuffer did mp.locks++,
+	// 注释：调用方检查trace.enabled==true，但trace.enabed可能在检查到现在之间已关闭。再次检查。traceLockBuffer执行了mp。locks++，
 	// StopTrace does stopTheWorld, and stopTheWorld waits for mp.locks to go back to zero,
+	// 注释：StopTrace会停止TheWorld，而stopTheWorld会等待mp.locks归零，
 	// so if we see trace.enabled == true now, we know it's true for the rest of the function.
+	// 注释：因此，如果我们现在看到trace.enabled==true，我们就知道它对函数的其余部分是true。
 	// Exitsyscall can run even during stopTheWorld. The race with StartTrace/StopTrace
 	// during tracing in exitsyscall is resolved by locking trace.bufLock in traceLockBuffer.
+	// 注释：Exitsyscall甚至可以在stopTheWorld期间运行。exitsyscall中跟踪期间StartTrace/StopTrace的争用通过在traceLockBuffer中锁定trace.bufLock来解决。
 	//
-	// Note trace_userTaskCreate runs the same check.
-	if !trace.enabled && !mp.startingtrace {
+	// Note trace_userTaskCreate runs the same check. // 注释：请注意trace_userTaskCreate运行相同的检查。
+	if !trace.enabled && !mp.startingtrace { // 注释：如果栈追踪已经关闭，并且没有开始执行栈追踪则释放并返回
 		traceReleaseBuffer(pid)
 		return
 	}
 
 	if skip > 0 {
-		if getg() == mp.curg {
+		if getg() == mp.curg { // 注释：如果线程本地存储中的G和当前M里的当前G相等则标记skip++(跳过顶部帧和当前指针)
 			skip++ // +1 because stack is captured in traceEventLocked.
 		}
 	}
@@ -542,42 +554,44 @@ func traceEvent(ev byte, skip int, args ...uint64) {
 }
 
 func traceEventLocked(extraBytes int, mp *m, pid int32, bufp *traceBufPtr, ev byte, skip int, args ...uint64) {
-	buf := bufp.ptr()
+	buf := bufp.ptr() // 注释获取缓冲区对象
 	// TODO: test on non-zero extraBytes param.
-	maxSize := 2 + 5*traceBytesPerNumber + extraBytes // event type, length, sequence, timestamp, stack id and two add params
-	if buf == nil || len(buf.arr)-buf.pos < maxSize {
-		buf = traceFlush(traceBufPtrOf(buf), pid).ptr()
-		bufp.set(buf)
+	maxSize := 2 + 5*traceBytesPerNumber + extraBytes // 注释：事件类型、长度、序列、时间戳、堆栈id和两个添加参数 // event type, length, sequence, timestamp, stack id and two add params
+	if buf == nil || len(buf.arr)-buf.pos < maxSize { // 注释：如果没有缓冲区对象，或缓冲区数组无法容纳时（数组长度 - 要写的位置 - 基础的数据 < 0）
+		buf = traceFlush(traceBufPtrOf(buf), pid).ptr() // 注释：把当前缓冲区放到队列中，返回空缓冲区地址
+		bufp.set(buf)                                   // 注释：重新设置缓冲区地址对象
 	}
+	// 注释：上面就是保证缓冲区的空间有足够的空间
 
-	ticks := uint64(cputicks()) / traceTickDiv
-	tickDiff := ticks - buf.lastTicks
-	buf.lastTicks = ticks
-	narg := byte(len(args))
+	ticks := uint64(cputicks()) / traceTickDiv // 注释：获取系统时钟时间
+	tickDiff := ticks - buf.lastTicks          // 注释：本次消耗的时间 = 系统时间 - 最后一次写入时间
+	buf.lastTicks = ticks                      // 注释：记录本次执行的时间
+	narg := byte(len(args))                    // 注释：获取扩展入参数量的byte大小
 	if skip >= 0 {
 		narg++
 	}
-	// We have only 2 bits for number of arguments.
-	// If number is >= 3, then the event type is followed by event length in bytes.
+	// We have only 2 bits for number of arguments. // 注释：我们只有2位作为自变量的数量。
+	// If number is >= 3, then the event type is followed by event length in bytes. // 注释：如果数字>=3，则事件类型后面跟着以字节为单位的事件长度。
+	// 注释：现在最大位数；最大位数是两位（3=011）
 	if narg > 3 {
 		narg = 3
 	}
-	startPos := buf.pos
-	buf.byte(ev | narg<<traceArgCountShift)
+	startPos := buf.pos                     // 注释：获取开始写入的偏移量下标，后面记录本次偏移量大小时使用
+	buf.byte(ev | narg<<traceArgCountShift) // 注释：(写入头部1byte的数据)（共8位）把参数大小（高位）和事件类型（低位），存储到缓冲区数组里（buf.arr）(每次记录的头部位置),并且偏移量下标加一
 	var lenp *byte
 	if narg == 3 {
-		// Reserve the byte for length assuming that length < 128.
-		buf.varint(0)
-		lenp = &buf.arr[buf.pos-1]
+		// Reserve the byte for length assuming that length < 128. // 注释：假设长度<128，则保留字节的长度。
+		buf.varint(0)              // 注释：写入一个0到缓冲数组中
+		lenp = &buf.arr[buf.pos-1] // 注释：记录写入前的地址(就是上面写入的0的位置的地址，方便后面对这块内存数据进行修改)
 	}
-	buf.varint(tickDiff)
-	for _, a := range args {
-		buf.varint(a)
+	buf.varint(tickDiff)     // 注释：把本次消耗的时间记录到缓冲区数组里
+	for _, a := range args { // 注释：循环扩展参数，把扩展参数记录到缓冲区数组里
+		buf.varint(a) // 注释：把扩展参数记录到缓冲区数组里
 	}
-	if skip == 0 {
-		buf.varint(0)
+	if skip == 0 { // 注释：如果步间值是0时
+		buf.varint(0) // 注释：记录0到缓冲区数组里
 	} else if skip > 0 {
-		buf.varint(traceStackID(mp, buf.stk[:], skip))
+		buf.varint(traceStackID(mp, buf.stk[:], skip)) // 注释：(获取栈ID并且添加到缓冲区数组里)跳过skip的个数的栈ID（buf.stk数组里存储的是栈ID）
 	}
 	evSize := buf.pos - startPos
 	if evSize > maxSize {
@@ -589,11 +603,12 @@ func traceEventLocked(extraBytes int, mp *m, pid int32, bufp *traceBufPtr, ev by
 	}
 }
 
+// 注释：跳过skip个数的的栈ID，返回跳过后的栈ID，buf是栈ID数组，skip是要跳过的栈ID的个数
 func traceStackID(mp *m, buf []uintptr, skip int) uint64 {
-	_g_ := getg()
-	gp := mp.curg
+	_g_ := getg() // 注释：从TLS里获取G地址对象
+	gp := mp.curg // 注释：获取传入的M中的G
 	var nstk int
-	if gp == _g_ {
+	if gp == _g_ { // 注释：如果传入的M中的G等于当前G
 		nstk = callers(skip+1, buf)
 	} else if gp != nil {
 		gp = mp.curg
@@ -605,62 +620,65 @@ func traceStackID(mp *m, buf []uintptr, skip int) uint64 {
 	if nstk > 0 && gp.goid == 1 {
 		nstk-- // skip runtime.main
 	}
-	id := trace.stackTab.put(buf[:nstk])
+	id := trace.stackTab.put(buf[:nstk]) // 注释：
 	return uint64(id)
 }
 
 // traceAcquireBuffer returns trace buffer to use and, if necessary, locks it.
+// 注释：获取当前G的M；M对应P的ID；全局栈追踪的缓冲区地址的指针(对象)
 func traceAcquireBuffer() (mp *m, pid int32, bufp *traceBufPtr) {
-	mp = acquirem()
-	if p := mp.p.ptr(); p != nil {
+	mp = acquirem()                // 注释：获取当前G的M,并加锁禁止抢占
+	if p := mp.p.ptr(); p != nil { // 注释：判断如果M的P存在，直接返回M和对应的P的ID，和P栈追踪缓冲区地址的指针(对象)
 		return mp, p.id, &p.tracebuf
 	}
-	lock(&trace.bufLock)
-	return mp, traceGlobProc, &trace.buf
+	lock(&trace.bufLock)                 // 注释：栈追踪，锁定
+	return mp, traceGlobProc, &trace.buf // 注释：返回M，当我们在没有真实P的情况下进行跟踪时使用的伪P的标识符；栈追踪缓冲区地址的指针(对象)
 }
 
 // traceReleaseBuffer releases a buffer previously acquired with traceAcquireBuffer.
+// 注释：释放先前使用traceAcquireBuffer获取的缓冲区。
 func traceReleaseBuffer(pid int32) {
-	if pid == traceGlobProc {
+	if pid == traceGlobProc { // 注释：如果没有对应P的ID直接解锁（没有P的时候会临时放一个站位的数组traceGlobProc）
 		unlock(&trace.bufLock)
 	}
-	releasem(getg().m)
+	releasem(getg().m) // 注释：释放M（解锁）
 }
 
-// traceFlush puts buf onto stack of full buffers and returns an empty buffer.
+// traceFlush puts buf onto stack of full buffers and returns an empty buffer. // 注释：traceFlush将buf放入已满缓冲区的堆栈中，并返回一个空缓冲区。
+// 注释：把buf缓冲区放到已满的缓冲区队列中，返回空的缓冲区对象地址
 func traceFlush(buf traceBufPtr, pid int32) traceBufPtr {
-	owner := trace.lockOwner
-	dolock := owner == nil || owner != getg().m.curg
-	if dolock {
-		lock(&trace.lock)
+	owner := trace.lockOwner                         // 注释：主G地址
+	dolock := owner == nil || owner != getg().m.curg // 注释：如果没有主G地址或者当前的G不是主G时为ture
+	if dolock {                                      // 注释：如果没有主G地址或者当前的G不是主G时为ture
+		lock(&trace.lock) // 注释：如果没有主G地址或者当前的G不是主G时，添加锁
 	}
 	if buf != 0 {
-		traceFullQueue(buf)
+		traceFullQueue(buf) // 注释：把buf缓冲区放到已满的缓冲区队列中
 	}
-	if trace.empty != 0 {
-		buf = trace.empty
-		trace.empty = buf.ptr().link
+	if trace.empty != 0 { // 注释：如果空缓冲区有缓冲区数据时，用空缓冲区里的数据对象
+		buf = trace.empty            // 注释：空缓冲区堆栈(和下面bufp.link.set(nil)一起组成出栈)
+		trace.empty = buf.ptr().link // 注释：把链表下一个缓冲区对象放到空缓冲区里
 	} else {
-		buf = traceBufPtr(sysAlloc(unsafe.Sizeof(traceBuf{}), &memstats.other_sys))
+		buf = traceBufPtr(sysAlloc(unsafe.Sizeof(traceBuf{}), &memstats.other_sys)) // 注释：如果空缓冲区对象里没有数据时，申请内存空间
 		if buf == 0 {
 			throw("trace: out of memory")
 		}
 	}
-	bufp := buf.ptr()
-	bufp.link.set(nil)
-	bufp.pos = 0
+	bufp := buf.ptr()  // 注释：取出缓冲区对象
+	bufp.link.set(nil) // 注释：断开链表连接（相当于出栈）
+	bufp.pos = 0       // 注释：清空下一个要写入的偏移量下标，（已经把偏移量的位置数据放到缓冲区已满的队列里了）
 
 	// initialize the buffer for a new batch
-	ticks := uint64(cputicks()) / traceTickDiv
-	bufp.lastTicks = ticks
-	bufp.byte(traceEvBatch | 1<<traceArgCountShift)
-	bufp.varint(uint64(pid))
-	bufp.varint(ticks)
+	ticks := uint64(cputicks()) / traceTickDiv      // 注释：获取系统时钟时间
+	bufp.lastTicks = ticks                          // 注释：记录最后一次处理的时间
+	bufp.byte(traceEvBatch | 1<<traceArgCountShift) // 注释：把traceEvBatch | 1<<traceArgCountShift(固定的数据前缀)放到缓冲区arr数组中，并把下一个要插入的偏移量下标加一（bufp.pos）
+	bufp.varint(uint64(pid))                        // 注释：把pid写入到缓冲去数组arr里
+	bufp.varint(ticks)                              // 注释：把系统时钟时间写入到缓冲去数组arr里
 
 	if dolock {
-		unlock(&trace.lock)
+		unlock(&trace.lock) // 注释：如果没有主G地址或者当前的G不是主G时，上面加的锁，这里要解锁
 	}
-	return buf
+	return buf // 注释：返回缓冲区数据对象
 }
 
 // traceString adds a string to the trace.strings and returns the id.
@@ -732,18 +750,22 @@ func traceAppend(buf []byte, v uint64) []byte {
 }
 
 // varint appends v to buf in little-endian-base-128 encoding.
+// 注释：variant在little-endian-base-128编码中将v附加到buf。
+// 注释：把v写入到缓冲去数组arr里
 func (buf *traceBuf) varint(v uint64) {
-	pos := buf.pos
+	pos := buf.pos // 注释：获取要写入的偏移量下标
+	// 注释：循环把数据写入到缓冲区数组里(每8位循环一次（0X80=128）)，处理64为系统的指针数据放到byte(8位)里
 	for ; v >= 0x80; v >>= 7 {
 		buf.arr[pos] = 0x80 | byte(v)
 		pos++
 	}
-	buf.arr[pos] = byte(v)
-	pos++
-	buf.pos = pos
+	buf.arr[pos] = byte(v) // 注释：把最后不足8位的数据放到数组里
+	pos++                  // 注释：偏移量下标加一
+	buf.pos = pos          // 注释：设置下一个要插入的缓冲区偏移量下标
 }
 
-// byte appends v to buf.
+// byte appends v to buf. // 注释：byte将v附加到buf。
+// 注释：把一个8位的byte类型加入到缓冲区数组里，并且偏移量下标加一
 func (buf *traceBuf) byte(v byte) {
 	buf.arr[buf.pos] = v
 	buf.pos++
@@ -759,12 +781,14 @@ type traceStackTable struct {
 }
 
 // traceStack is a single stack in traceStackTable.
+// 注释：traceStack是traceStackTable中的单个堆栈。
+// 注释：追溯的堆栈记录
 type traceStack struct {
-	link traceStackPtr
-	hash uintptr
-	id   uint32
-	n    int
-	stk  [0]uintptr // real type [n]uintptr
+	link traceStackPtr // 注释：追溯堆栈指针对象
+	hash uintptr       // 注释：堆栈内存的哈希值
+	id   uint32        // 注释：追溯的栈记录的自增ID，（每次访问堆栈对象时自增）
+	n    int           // 注释：堆栈的长度（堆栈内存个数）
+	stk  [0]uintptr    // 注释：堆栈ID(内存地址)数组(也是PC值)的首指针，用来存储堆栈的ID数组，数组的长度时n // real type [n]uintptr
 }
 
 type traceStackPtr uintptr
@@ -778,6 +802,7 @@ func (ts *traceStack) stack() []uintptr {
 
 // put returns a unique id for the stack trace pcs and caches it in the table,
 // if it sees the trace for the first time.
+// 注释：put为堆栈跟踪pc返回一个唯一的id，如果它第一次看到跟踪，则将其缓存在表中。
 func (tab *traceStackTable) put(pcs []uintptr) uint32 {
 	if len(pcs) == 0 {
 		return 0
@@ -793,21 +818,21 @@ func (tab *traceStackTable) put(pcs []uintptr) uint32 {
 		unlock(&tab.lock)
 		return id
 	}
-	// Create new record.
-	tab.seq++
-	stk := tab.newStack(len(pcs))
-	stk.hash = hash
-	stk.id = tab.seq
-	stk.n = len(pcs)
-	stkpc := stk.stack()
-	for i, pc := range pcs {
-		stkpc[i] = pc
+	// Create new record. // 注释：创建新的记录
+	tab.seq++                     // 注释：堆栈记录的ID
+	stk := tab.newStack(len(pcs)) // 注释：申请堆栈记录的内存
+	stk.hash = hash               // 注释：保存哈希
+	stk.id = tab.seq              // 注释：保存记录的ID
+	stk.n = len(pcs)              // 注释：保存记录的长度
+	stkpc := stk.stack()          // 注释：记录的数据部分的指针数组，是有多个栈地址组成的数组，长度是n
+	for i, pc := range pcs {      // 注释：把传入的栈id(内存地址)
+		stkpc[i] = pc // 注释：把传入的栈id(内存地址)，写入数组中(记录的数据部分)
 	}
 	part := int(hash % uintptr(len(tab.tab)))
 	stk.link = tab.tab[part]
 	atomicstorep(unsafe.Pointer(&tab.tab[part]), unsafe.Pointer(stk))
 	unlock(&tab.lock)
-	return stk.id
+	return stk.id // 注释：返回记录的ID
 }
 
 // find checks if the stack trace pcs is already present in the table.
@@ -828,6 +853,7 @@ Search:
 }
 
 // newStack allocates a new stack of size n.
+// 注释：申请堆栈记录的内存，内存的大小时结构体的大小加数据数组的大小
 func (tab *traceStackTable) newStack(n int) *traceStack {
 	return (*traceStack)(tab.mem.alloc(unsafe.Sizeof(traceStack{}) + uintptr(n)*sys.PtrSize))
 }
@@ -980,6 +1006,7 @@ func traceProcStart() {
 func traceProcStop(pp *p) {
 	// Sysmon and stopTheWorld can stop Ps blocked in syscalls,
 	// to handle this we temporary employ the P.
+	// 注释：Sysmon和stopTheWorld可以阻止系统调用中阻止的P，为了处理这个问题，我们临时使用了P。
 	mp := acquirem()
 	oldp := mp.p
 	mp.p.set(pp)
@@ -1109,8 +1136,9 @@ func traceGoUnpark(gp *g, skip int) {
 	}
 }
 
+// 注释：系统栈追踪
 func traceGoSysCall() {
-	traceEvent(traceEvGoSysCall, 1)
+	traceEvent(traceEvGoSysCall, 1) // 注释：执行栈事件，事件常量是系统栈追踪
 }
 
 func traceGoSysExit(ts int64) {
@@ -1132,15 +1160,17 @@ func traceGoSysExit(ts int64) {
 	traceEvent(traceEvGoSysExit, -1, uint64(_g_.goid), _g_.traceseq, uint64(ts)/traceTickDiv)
 }
 
+// 注释：系统调用停止时的栈追踪
 func traceGoSysBlock(pp *p) {
 	// Sysmon and stopTheWorld can declare syscalls running on remote Ps as blocked,
 	// to handle this we temporary employ the P.
-	mp := acquirem()
-	oldp := mp.p
-	mp.p.set(pp)
-	traceEvent(traceEvGoSysBlock, -1)
-	mp.p = oldp
-	releasem(mp)
+	// 注释：Sysmon和stopTheWorld可以将在远程P上运行的系统调用声明为阻塞，为了处理此问题，我们临时使用P。
+	mp := acquirem()                  // 注释：获取当前P。临时使用
+	oldp := mp.p                      // 注释：把P存储起来
+	mp.p.set(pp)                      // 注释：把传入的P替换当前的P，后面栈事件使用
+	traceEvent(traceEvGoSysBlock, -1) // 注释：栈事件,系统调用停止时的栈追踪
+	mp.p = oldp                       //注释：还原原来的P
+	releasem(mp)                      //注释：释放临时的P
 }
 
 func traceHeapAlloc() {
