@@ -612,7 +612,7 @@ func mapassign(t *maptype, h *hmap, key unsafe.Pointer) unsafe.Pointer {
 	if h == nil {
 		panic(plainError("assignment to entry in nil map"))
 	}
-	// 注释：数据竟成是否开启
+	// 注释：数据竞争是否开启
 	if raceenabled {
 		callerpc := getcallerpc()
 		pc := funcPC(mapassign)

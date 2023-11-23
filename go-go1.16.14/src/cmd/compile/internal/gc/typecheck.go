@@ -1725,7 +1725,7 @@ func typecheck1(n *Node, top int) (res *Node) {
 
 	case OMAKE:
 		ok |= ctxExpr
-		args := n.List.Slice()
+		args := n.List.Slice() //获取值len和cap
 		if len(args) == 0 {
 			yyerror("missing argument to make")
 			n.Type = nil
