@@ -81,9 +81,9 @@ var modinfo string
 // for nmspinning manipulation.
 
 var (
-	m0           m // 注释：代表进程的主线程
-	g0           g // 注释：m0的g0，也就是m0.g0 = &g0
-	mcache0      *mcache
+	m0           m       // 注释：代表进程的主线程
+	g0           g       // 注释：m0的g0，也就是m0.g0 = &g0
+	mcache0      *mcache // 注释：（P0的内存缓存）引导程序mcache0。P的ID为0的将获得mcache0
 	raceprocctx0 uintptr
 )
 
@@ -3883,7 +3883,7 @@ func exitsyscall() {
 // 注释：系统调用快速后置函数
 //go:nosplit
 func exitsyscallfast(oldp *p) bool {
-	_g_ := getg()
+	_g_ := getg() // 注释：获取当前G
 
 	// Freezetheworld sets stopwait but does not retake P's. // 注释：Freezetheworld设置了stopwait，但没有重夺P。
 	if sched.stopwait == freezeStopWait { // 注释：如果是冻结状态的直接返回false
@@ -3893,7 +3893,7 @@ func exitsyscallfast(oldp *p) bool {
 	// Try to re-acquire the last P. // 注释：尝试重新获取最后一个P。
 	if oldp != nil && oldp.status == _Psyscall && atomic.Cas(&oldp.status, _Psyscall, _Pidle) { // 注释：如果成功把系统调用前的P的状态从系统调用更改为空闲状态
 		// There's a cpu for us, so we can run.
-		wirep(oldp)
+		wirep(oldp) // 注释：当前线程m和p相互绑定，并且把p的状态从_Pidle设置成_Prunning
 		exitsyscallfast_reacquired()
 		return true
 	}
@@ -3924,6 +3924,7 @@ func exitsyscallfast(oldp *p) bool {
 // exitsyscallfast_reacquired is the exitsyscall path on which this G
 // has successfully reacquired the P it was running on before the
 // syscall.
+// 注释：exitsyscallfast_reacquired是exitsyscall路径，在该路径上，该G已成功重新获取其在6系统调用之前运行的P。
 //
 //go:nosplit
 func exitsyscallfast_reacquired() {
@@ -4831,6 +4832,7 @@ func (pp *p) init(id int32) {
 			}
 			// Use the bootstrap mcache0. Only one P will get
 			// mcache0: the one with ID 0.
+			// 注释：使用引导程序mcache0。只有一个P将获得mcache0：ID为0的那个。
 			pp.mcache = mcache0
 		} else {
 			pp.mcache = allocmcache()
@@ -5044,7 +5046,7 @@ func procresize(nprocs int32) *p {
 	}
 
 	// g.m.p is now set, so we no longer need mcache0 for bootstrapping.
-	mcache0 = nil
+	mcache0 = nil // 注释：g.m.p现已设置，因此我们不再需要mcache0进行引导。
 
 	// release resources from unused P's
 	for i := nprocs; i < old; i++ {
