@@ -3,6 +3,8 @@
 
 package runtime
 
+// 注释：【objects】字段 = 【bytes/span】字段 /【bytes/obj】字段
+// 对象ID   对象大小    span大小   对象(块)个数   碎片大小
 // class  bytes/obj  bytes/span  objects  tail waste  max waste
 //     1          8        8192     1024           0     87.50%
 //     2         16        8192      512           0     43.75%
@@ -73,11 +75,11 @@ package runtime
 //    67      32768       32768        1           0     12.50%
 
 const (
-	_MaxSmallSize   = 32768
+	_MaxSmallSize   = 32768 // 注释：小对象容量最大值32KB
 	smallSizeDiv    = 8
 	smallSizeMax    = 1024
 	largeSizeDiv    = 128
-	_NumSizeClasses = 68
+	_NumSizeClasses = 68 // 注释：对象总个数
 	_PageShift      = 13
 )
 

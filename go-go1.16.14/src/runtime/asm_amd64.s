@@ -13,9 +13,9 @@
 // number of arguments and the C-style argv.
 // 注释：程序真正的入口
 TEXT _rt0_amd64(SB),NOSPLIT,$-8
-	MOVQ	0(SP), DI	// argc
-	LEAQ	8(SP), SI	// argv
-	JMP	runtime·rt0_go(SB)
+	MOVQ	0(SP), DI	// 注释：把命令行参数个数放到寄存器DI里 // argc
+	LEAQ	8(SP), SI	// 注释：把命令行参数放到寄存器SI里    // argv
+	JMP	runtime·rt0_go(SB) // 注释：调用runtime·rt0_go函数（汇编语言实现的）
 
 // main is common startup code for most amd64 systems when using
 // external linking. The C startup code will call the symbol "main"
@@ -232,12 +232,12 @@ ok:
 	MOVQ	$runtime·mainPC(SB), AX	 // 注释：(runtime.main函数指针放到AX里)访问全局变量runtime·mainPC，内容是runtime.main函数指针	// entry
 	PUSHQ	AX                       // 注释：参数2入栈(值是&runtime.main)，把AX作为下个函数第2个参数，相当于subq $8,SP；movq AX,SP
 	PUSHQ	$0                       // 注释：参数1入栈，把0作为下个函数第1个参数，相当于subq $8,SP；movq $0,SP		// arg size
-	CALL	runtime·newproc(SB)      // 注释：新建一个g，也叫main goroutine，它的任务函数是runtime.main函数，建好后插入m0绑定的p的本地队列
+	CALL	runtime·newproc(SB)      // 注释：(此时还没有执行只是添加队列)新建一个g，也叫main goroutine，它的任务函数是runtime.main函数，建好后插入m0绑定的p的本地队列
 	POPQ	AX                       // 注释：出栈，去除上面的参数位置
 	POPQ	AX                       // 注释：出栈，去除上面的参数位置
 
 	// start this M
-	CALL	runtime·mstart(SB)       // 注释：启动线程m，进入启动调度系统
+	CALL	runtime·mstart(SB)       // 注释：启动线程m，进入启动调度系统（开始执行调度和业务代码）
 
 	CALL	runtime·abort(SB)	// mstart should never return
 	RET
@@ -479,21 +479,25 @@ TEXT runtime·morestack_noctxt(SB),NOSPLIT,$0
 
 // reflectcall: call a function with the given argument list
 // func call(argtype *_type, f *FuncVal, arg *byte, argsize, retoffset uint32).
+// 注释：reflectcall：使用给定的参数列表func调用（argtype*_type，f*FuncVal，arg*byte，argsize，retoffset uint32）调用函数。
 // we don't have variable-sized frames, so we use a small number
 // of constant-sized-frame functions to encode a few bits of size in the pc.
-// Caution: ugly multiline assembly macros in your future!
+// 注释：我们没有可变大小的帧，所以我们使用少量恒定大小的帧函数来在pc中编码一些大小的比特。
+// Caution: ugly multiline assembly macros in your future! // 注释：注意：将来会出现难看的多行汇编宏！
 
+// 注释：宏，用来比较并且执行，CX寄存器 > $MAXSIZE则跳过，小于则执行NAME对应的函数地址
 #define DISPATCH(NAME,MAXSIZE)		\
-	CMPQ	CX, $MAXSIZE;		\
-	JA	3(PC);			\
-	MOVQ	$NAME(SB), AX;		\
-	JMP	AX
+	CMPQ	CX, $MAXSIZE;		\           // 注释：比较CX和第二个入参
+	JA	3(PC);			\                   // 注释：如果CX > 第二个入参，则根据当前PC地址向后跳转3个PC位置（这里的意思是向后执行下个DISPATCH）
+	MOVQ	$NAME(SB), AX;		\           // 注释：这里把NAME的栈地址赋值给寄存器AX，用来跳转执行
+	JMP	AX                                  // 注释：跳转执行
 // Note: can't just "JMP NAME(SB)" - bad inlining results.
 
+// 注释：这里会调用d.fn函数，就是refer里执行的函数
 TEXT ·reflectcall<ABIInternal>(SB), NOSPLIT, $0-32
 	MOVLQZX argsize+24(FP), CX
-	DISPATCH(runtime·call16, 16)
-	DISPATCH(runtime·call32, 32)
+	DISPATCH(runtime·call16, 16) // 注释：DISPATCH是个宏(在上面有定义),16 > CX寄存器则执行下一个，否则执行runtime·call16函数,这个函数也被一个宏包裹(宏名称：CALLFN)
+	DISPATCH(runtime·call32, 32) // 注释：32 > CX寄存器则继续向下执行比较，否则执行runtime·call32
 	DISPATCH(runtime·call64, 64)
 	DISPATCH(runtime·call128, 128)
 	DISPATCH(runtime·call256, 256)
@@ -519,9 +523,10 @@ TEXT ·reflectcall<ABIInternal>(SB), NOSPLIT, $0-32
 	DISPATCH(runtime·call268435456, 268435456)
 	DISPATCH(runtime·call536870912, 536870912)
 	DISPATCH(runtime·call1073741824, 1073741824)
-	MOVQ	$runtime·badreflectcall(SB), AX
+	MOVQ	$runtime·badreflectcall(SB), AX         // 注释：如果上面都没有比较通过，则panic
 	JMP	AX
 
+// 注释：定义宏
 #define CALLFN(NAME,MAXSIZE)			\
 TEXT NAME(SB), WRAPPER, $MAXSIZE-32;		\
 	NO_LOCAL_POINTERS;			\
@@ -560,7 +565,7 @@ TEXT callRet<>(SB), NOSPLIT, $32-0
 	CALL	runtime·reflectcallmove(SB)
 	RET
 
-CALLFN(·call16, 16)
+CALLFN(·call16, 16)     // 注释：CALLFN是一个宏，上面有定义，用宏来组装汇编函数(因为只有函数名和栈大小不同，所以才用宏的方式实现)
 CALLFN(·call32, 32)
 CALLFN(·call64, 64)
 CALLFN(·call128, 128)
@@ -896,16 +901,16 @@ done:
 	RET                     // 注释：汇编函数返回结束
 
 // func memhash(p unsafe.Pointer, h, s uintptr) uintptr
-// hash function using AES hardware instructions
+// hash function using AES hardware instructions // 注释：使用AES硬件指令的散列函数
 TEXT runtime·memhash(SB),NOSPLIT,$0-32
-	CMPB	runtime·useAeshash(SB), $0
-	JEQ	noaes
-	MOVQ	p+0(FP), AX	// ptr to data
-	MOVQ	s+16(FP), CX	// size
-	LEAQ	ret+24(FP), DX
-	JMP	aeshashbody<>(SB)
+	CMPB	runtime·useAeshash(SB), $0      // 注释：判断runtime·useAeshash(SB)是否等于0
+	JEQ	noaes                               // 注释：如果等于零跳转到noaes
+	MOVQ	p+0(FP), AX	// ptr to data      // 注释：获取指针地址(第一个参数,AMD64系统指针是8字节64位)放到寄存器AX中
+	MOVQ	s+16(FP), CX	// size         // 注释：获取大小(第三个个参数)放到CX寄存器里
+	LEAQ	ret+24(FP), DX                  // 注释：把返回值的内存地址放到DX寄存器里
+	JMP	aeshashbody<>(SB)                   // 注释：执行(跳转到)aeshashbody,跳转时可以访问上面的参数（第二个参数就是在调用函数时使用）
 noaes:
-	JMP	runtime·memhashFallback(SB)
+	JMP	runtime·memhashFallback(SB)         // 注释：执行(跳转到)runtime·memhashFallback
 
 // func strhash(p unsafe.Pointer, h uintptr) uintptr
 TEXT runtime·strhash(SB),NOSPLIT,$0-24
@@ -922,25 +927,27 @@ noaes:
 // AX: data
 // CX: length
 // DX: address to put return value
+// 注释：在执行前内存寄存器里AX表示数据（内存指针），CX是尺寸大小，DX是存放返回的数据指针
+// 注释：执行使用AES计算哈希值
 TEXT aeshashbody<>(SB),NOSPLIT,$0-0
-	// Fill an SSE register with our seeds.
-	MOVQ	h+8(FP), X0			// 64 bits of per-table hash seed
-	PINSRW	$4, CX, X0			// 16 bits of length
-	PSHUFHW $0, X0, X0			// repeat length 4 times total
-	MOVO	X0, X1				// save unscrambled seed
-	PXOR	runtime·aeskeysched(SB), X0	// xor in per-process seed
-	AESENC	X0, X0				// scramble seed
+	// Fill an SSE register with our seeds. // 注释： 用我们的种子填写SSE登记册。
+	MOVQ	h+8(FP), X0			// 64 bits of per-table hash seed   // 注释：(就是上面的第二个参数)每个表的64位散列种子
+	PINSRW	$4, CX, X0			// 16 bits of length                // 注释：长度为16位,将CX中的低位插入到X0中的第4个位置
+	PSHUFHW $0, X0, X0			// repeat length 4 times total      // 注释：重复长度总计4次，（根据X0（第三个参数）中编码对X0（第二个参数）高位进行打乱处理，结果放到0中（丢掉结果））
+	MOVO	X0, X1				// save unscrambled seed            // 注释：保存未处理的种子，到X1中
+	PXOR	runtime·aeskeysched(SB), X0	// xor in per-process seed  // 注释：每个进程种子中的xor
+	AESENC	X0, X0				// scramble seed                    // 注释：打乱种子(执行一轮AES加密流程)
 
-	CMPQ	CX, $16
-	JB	aes0to15
-	JE	aes16
-	CMPQ	CX, $32
-	JBE	aes17to32
-	CMPQ	CX, $64
-	JBE	aes33to64
-	CMPQ	CX, $128
-	JBE	aes65to128
-	JMP	aes129plus
+	CMPQ	CX, $16             // 注释：判断CX寄存器里的值和16相比较
+	JB	aes0to15                // 注释：如果小于则跳转到aes0to15标记
+	JE	aes16                   // 注释：如果等于则跳转aes16标记
+	CMPQ	CX, $32             // 注释：比较CX和32
+	JBE	aes17to32               // 注释：小于等于是跳转到aes17to32标记
+	CMPQ	CX, $64             // 注释：比较CX寄存器和64
+	JBE	aes33to64               // 注释：小于等于时跳转到aes33to64标记
+	CMPQ	CX, $128            // 注释：比较CX寄存器和128
+	JBE	aes65to128              // 注释：小于等于时跳转到aes65to128标记
+	JMP	aes129plus              // 注释：无条件跳转到aes129plus标记
 
 aes0to15:
 	TESTQ	CX, CX

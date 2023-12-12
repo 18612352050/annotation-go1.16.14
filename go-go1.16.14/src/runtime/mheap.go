@@ -62,11 +62,11 @@ const (
 type mheap struct {
 	// lock must only be acquired on the system stack, otherwise a g
 	// could self-deadlock if its stack grows with the lock held.
-	lock      mutex
-	pages     pageAlloc // page allocation data structure
-	sweepgen  uint32    // sweep generation, see comment in mspan; written during STW
-	sweepdone uint32    // all spans are swept
-	sweepers  uint32    // number of active sweepone calls
+	lock      mutex     // 注释：互斥锁
+	pages     pageAlloc // 注释：指向spans区域，用于映射span和page的关系(页面分配数据结构) // page allocation data structure
+	sweepgen  uint32    // 注释：GC清理的计数器(GC清理版本)（每次GC清理开始处自增2）// sweep generation, see comment in mspan; written during STW
+	sweepdone uint32    // 注释：所有的内存区块（span）都已经被扫描和清理了 // all spans are swept
+	sweepers  uint32    // 注释：活动的处理sweepdone的数量 // number of active sweepone calls
 
 	// allspans is a slice of all mspans ever created. Each mspan
 	// appears exactly once.
@@ -84,16 +84,19 @@ type mheap struct {
 	_ uint32 // align uint64 fields on 32-bit for atomics
 
 	// Proportional sweep
+	// 注释：比例扫描
 	//
 	// These parameters represent a linear function from heap_live
 	// to page sweep count. The proportional sweep system works to
 	// stay in the black by keeping the current page sweep count
 	// above this line at the current heap_live.
+	// 注释：这些参数代表了从 heap_live 到页面扫描计数的线性函数。比例扫描系统的工作原理是通过保持当前堆存活量下的页面扫描计数高于该线条来保持在良好状态。
 	//
 	// The line has slope sweepPagesPerByte and passes through a
 	// basis point at (sweepHeapLiveBasis, pagesSweptBasis). At
 	// any given time, the system is at (memstats.heap_live,
 	// pagesSwept) in this space.
+	// 注释：这条线的斜率为 sweepPagesPerByte，并通过一个基础点 (sweepHeapLiveBasis, pagesSweptBasis)。在任何给定的时刻，系统在这个空间中处于 (memstats.heap_live, pagesSwept) 的位置。
 	//
 	// It's important that the line pass through a point we
 	// control rather than simply starting at a (0,0) origin
@@ -101,17 +104,19 @@ type mheap struct {
 	// accounting for current progress. If we could only adjust
 	// the slope, it would create a discontinuity in debt if any
 	// progress has already been made.
-	pagesInUse         uint64  // pages of spans in stats mSpanInUse; updated atomically
-	pagesSwept         uint64  // pages swept this cycle; updated atomically
-	pagesSweptBasis    uint64  // pagesSwept to use as the origin of the sweep ratio; updated atomically
-	sweepHeapLiveBasis uint64  // value of heap_live to use as the origin of sweep ratio; written with lock, read without
-	sweepPagesPerByte  float64 // proportional sweep ratio; written with lock, read without
+	// 注释：重要的是，该线条通过我们控制的一个点而不是简单地从 (0,0) 原点开始，因为这样可以让我们在任何时候调整扫描步调，同时考虑当前的进展。如果我们只能调整斜率，那么如果已经取得了任何进展，将会产生债务上的不连续性。
+	pagesInUse         uint64  // 注释：stats 结构中的 mSpanInUse 字段中跟踪的 span 页数；这些页数是以原子方式更新的。 // pages of spans in stats mSpanInUse; updated atomically
+	pagesSwept         uint64  // 注释：页面扫过了这个周期；以原子方式更新 // pages swept this cycle; updated atomically
+	pagesSweptBasis    uint64  // 注释：（清扫扫描的基点）用作扫描比的原点；以原子方式更新 // pagesSwept to use as the origin of the sweep ratio; updated atomically
+	sweepHeapLiveBasis uint64  // 注释：heap_live的值用作扫掠比的原点；写入带锁，读取不带锁 // value of heap_live to use as the origin of sweep ratio; written with lock, read without
+	sweepPagesPerByte  float64 // 注释：平衡(均衡)清扫比例；写入带锁，读取不带锁 // proportional sweep ratio; written with lock, read without
 	// TODO(austin): pagesInUse should be a uintptr, but the 386
 	// compiler can't 8-byte align fields.
 
 	// scavengeGoal is the amount of total retained heap memory (measured by
 	// heapRetained) that the runtime will try to maintain by returning memory
 	// to the OS.
+	// 注释：scavengeGoal 是指运行时将尝试通过将内存返回给操作系统来维持的总保留堆内存量（由 heapRetained 衡量）。
 	scavengeGoal uint64
 
 	// Page reclaimer state
@@ -153,7 +158,7 @@ type mheap struct {
 	// platforms (even 64-bit), arenaL1Bits is 0, making this
 	// effectively a single-level map. In this case, arenas[0]
 	// will never be nil.
-	arenas [1 << arenaL1Bits]*[1 << arenaL2Bits]*heapArena
+	arenas [1 << arenaL1Bits]*[1 << arenaL2Bits]*heapArena // 注释：arenas[1]*[1<<22]*heapArena ，每个heapArena是64M，所以这里管理了 64M << 22 = 256TB
 
 	// heapArenaAlloc is pre-reserved space for allocating heapArena
 	// objects. This is only used on 32-bit, where we pre-reserve
@@ -192,20 +197,24 @@ type mheap struct {
 
 	// curArena is the arena that the heap is currently growing
 	// into. This should always be physPageSize-aligned.
+	// 注释：curArena是堆目前正在增长的arena。这应该始终与physPageSize对齐。
 	curArena struct {
-		base, end uintptr
+		base, end uintptr // 注释：指示arena区首/尾地址
 	}
 
 	_ uint32 // ensure 64-bit alignment of central
 
 	// central free lists for small size classes.
+	// 注释：central是空闲的小型对象列表
 	// the padding makes sure that the mcentrals are
 	// spaced CacheLinePadSize bytes apart, so that each mcentral.lock
 	// gets its own cache line.
+	// 注释：填充确保mcentrals的CacheLinePadSize字节间隔开，这样每个mcentral.lock都有自己的缓存行
 	// central is indexed by spanClass.
-	central [numSpanClasses]struct {
-		mcentral mcentral
-		pad      [cpu.CacheLinePadSize - unsafe.Sizeof(mcentral{})%cpu.CacheLinePadSize]byte
+	// 注释：堆里空闲的mcentral，
+	central [numSpanClasses]struct { // 注释：是class对象表的两倍(每种class对应的两个mcentral,分别表示已经被mcache缓存了和没有被mcache缓存)
+		mcentral mcentral                                                                    // 注释：中心缓存mcentral，操作时需要对mheap加锁，包含有空闲和无空闲两个结构，每个结构包含GC已扫描和未扫描的两个span链表
+		pad      [cpu.CacheLinePadSize - unsafe.Sizeof(mcentral{})%cpu.CacheLinePadSize]byte // 注释：用来数据对其
 	}
 
 	spanalloc             fixalloc // allocator for span*
@@ -304,6 +313,7 @@ type arenaHint struct {
 }
 
 // An mspan is a run of pages.
+// 注释：译：mspan是一组页面。
 //
 // When a mspan is in the heap free treap, state == mSpanFree
 // and heapmap(s->start) == span, heapmap(s->start+s->npages-1) == span.
@@ -320,16 +330,16 @@ type arenaHint struct {
 // mSpanManual, or mSpanFree. Transitions between these states are
 // constrained as follows:
 //
-// * A span may transition from free to in-use or manual during any GC
-//   phase.
+//   - A span may transition from free to in-use or manual during any GC
+//     phase.
 //
-// * During sweeping (gcphase == _GCoff), a span may transition from
-//   in-use to free (as a result of sweeping) or manual to free (as a
-//   result of stacks being freed).
+//   - During sweeping (gcphase == _GCoff), a span may transition from
+//     in-use to free (as a result of sweeping) or manual to free (as a
+//     result of stacks being freed).
 //
-// * During GC (gcphase != _GCoff), a span *must not* transition from
-//   manual or in-use to free. Because concurrent GC may read a pointer
-//   and then look up its span, the span state must be monotonic.
+//   - During GC (gcphase != _GCoff), a span *must not* transition from
+//     manual or in-use to free. Because concurrent GC may read a pointer
+//     and then look up its span, the span state must be monotonic.
 //
 // Setting mspan.state to mSpanInUse or mSpanManual must be done
 // atomically and only after all other span fields are valid.
@@ -338,21 +348,23 @@ type arenaHint struct {
 // before depending on other fields. This allows the garbage collector
 // to safely deal with potentially invalid pointers, since resolving
 // such pointers may race with a span being allocated.
-type mSpanState uint8
+type mSpanState uint8 // 注释：span的状态（内存管理单元的状态）
 
+// 注释：span的状态，一共有4中状态，这里第四中状态没有定义，第四中状态值为3，下面状态码映射名称的map里有定义
 const (
-	mSpanDead   mSpanState = iota
-	mSpanInUse             // allocated for garbage collected heap
-	mSpanManual            // allocated for manual management (e.g., stack allocator)
+	mSpanDead   mSpanState = iota // 注释：内存已回收，初始化时或将跨度span释放回堆中时设置
+	mSpanInUse                    // 注释：无空闲（已经被分配）// allocated for garbage collected heap
+	mSpanManual                   // 注释：无空闲（已经被分配）分配用于手动管理 // allocated for manual management (e.g., stack allocator)
 )
 
 // mSpanStateNames are the names of the span states, indexed by
 // mSpanState.
+// 注释：span状态名称：一共有4中状态
 var mSpanStateNames = []string{
-	"mSpanDead",
-	"mSpanInUse",
-	"mSpanManual",
-	"mSpanFree",
+	"mSpanDead",   // 注释：内存已回收，初始化时或将跨度span释放回堆中时设置
+	"mSpanInUse",  // 注释：无空闲（已经被分配）
+	"mSpanManual", // 注释：无空闲（已经被分配）分配用于手动管理
+	"mSpanFree",   // 注释：有空闲（在空闲堆中）
 }
 
 // mSpanStateBox holds an mSpanState and provides atomic operations on
@@ -378,53 +390,74 @@ type mSpanList struct {
 	last  *mspan // last span in list, or nil if none
 }
 
+// 注释：span是内存管理的基本单位,每个span用于管理特定的class对象, 跟据对象大小，span将一个或多个页拆分成多个块进行管理。
+// 注释：span的结构体(双向链表结构)
+//
 //go:notinheap
 type mspan struct {
-	next *mspan     // next span in list, or nil if none
-	prev *mspan     // previous span in list, or nil if none
+	next *mspan     // 注释：列表中的下一个span，如果没有则为nil(用于将span链接起来) // next span in list, or nil if none
+	prev *mspan     // 注释：列表中的前一个span，如果没有则为nil(用于将span链接起来) // previous span in list, or nil if none
 	list *mSpanList // For debugging. TODO: Remove.
 
-	startAddr uintptr // address of first byte of span aka s.base()
-	npages    uintptr // number of pages in span
+	startAddr uintptr // 注释：mpan管理内存的基地址(起始地址，也即所管理页的地址) // address of first byte of span aka s.base()
+	npages    uintptr // 注释：管理的页数 // number of pages in span
 
 	manualFreeList gclinkptr // list of free objects in mSpanManual spans
 
 	// freeindex is the slot index between 0 and nelems at which to begin scanning
 	// for the next free object in this span.
+	// 注释：freeindex是介于0和nelem之间的索引下标，在该下标处开始扫描此跨度中的下一个空闲对象。
 	// Each allocation scans allocBits starting at freeindex until it encounters a 0
 	// indicating a free object. freeindex is then adjusted so that subsequent scans begin
 	// just past the newly discovered free object.
+	// 注释：每个分配从freeindex开始扫描allocBits，直到它遇到一个指示空闲对象的0。然后调整freeindex，使得随后的扫描刚好在新发现的自由对象之后开始。
 	//
 	// If freeindex == nelem, this span has no free objects.
+	// 注释：如果freeindex==nelem，则此跨度没有可用对象。
 	//
 	// allocBits is a bitmap of objects in this span.
 	// If n >= freeindex and allocBits[n/8] & (1<<(n%8)) is 0
 	// then object n is free;
 	// otherwise, object n is allocated. Bits starting at nelem are
 	// undefined and should never be referenced.
+	// 注释：allocBits是此跨度中对象的位图。如果n>=freeindex并且allocBits[n/8] & (1<<(n%8))为0，则对象n是空闲的；否则，n已经分配对象了。从nelem开始的位是未定义的，永远不应该被引用。
 	//
 	// Object n starts at address n*elemsize + (start << pageShift).
-	freeindex uintptr
+	// 注释：对象n从地址 n*elemsize + (start << pageShift)。
+	freeindex uintptr // 注释：空闲对象块的下标位置（下标范围是[0 - nelems]之间(包含nelems)）空闲内存地址是 s.freeindex * s.elemsize + s.base()
 	// TODO: Look up nelems from sizeclass and remove this field if it
 	// helps performance.
-	nelems uintptr // number of object in the span.
+	// 注释：nelems对应class表(/src/runtime/sizeclasses.go)【objects】字段；【objects字段】 = 【bytes/span字段】 / 【bytes/obj字段】
+	// 注释：【bytes/span字段】表示一个span的大小
+	// 注释：【bytes/obj字段】表示span可以存放的对象大小
+	// 注释：一共有68种span每个span有自己的块个数(classId=0除外，这个span是存放大对象的时候使用的)
+	nelems uintptr // 注释：span中可容纳的总对象块数量，也即有多少个块可供分配（对应class表【objects】字段） (位置：/src/runtime/sizeclasses.go)// number of object in the span.
 
 	// Cache of the allocBits at freeindex. allocCache is shifted
 	// such that the lowest bit corresponds to the bit freeindex.
+	// 注释：freeindex处allocBits的缓存。allocCache被移位，使得最低比特对应于比特空闲索引。
 	// allocCache holds the complement of allocBits, thus allowing
 	// ctz (count trailing zero) to use it directly.
+	// 注释：allocCache保存allocBits的补码，因此允许ctz（计数尾随零）直接使用它。
 	// allocCache may contain bits beyond s.nelems; the caller must ignore
 	// these.
-	allocCache uint64
+	// 注释：allocCache可能包含超出s.nelems的位；调用者必须忽略这些。
+	// 注释：allocCache是allocBits的补码(是8个一组，每组前后调换位置，第一组放在allocCache的低8位上面)，为了方便ctz
+	allocCache uint64 // 注释：(当前span的快速缓存)位图0已分配1空闲(默认1)(每一位控制一个span的1块，最大控制64块，每种sapn的块数量固定【objects】位置：/src/runtime/sizeclasses.go)。
 
 	// allocBits and gcmarkBits hold pointers to a span's mark and
 	// allocation bits. The pointers are 8 byte aligned.
 	// There are three arenas where this data is held.
+	// 注释：allocBits和gcmarkBits保存指向span's的标记和分配位的指针。指针是8字节对齐的。有三个领域可以保存这些数据。
 	// free: Dirty arenas that are no longer accessed
 	//       and can be reused.
 	// next: Holds information to be used in the next GC cycle.
 	// current: Information being used during this GC cycle.
 	// previous: Information being used during the last GC cycle.
+	// 注释：free：肮脏的arenas不再被访问，可以重复使用。
+	// 		next：保存要在下一个GC周期中使用的信息。
+	// 		current：此GC周期中使用的信息。
+	// 		previous：在上一个GC周期中使用的信息。
 	// A new GC cycle starts with the call to finishsweep_m.
 	// finishsweep_m moves the previous arena to the free arena,
 	// the current arena to the previous arena, and
@@ -432,6 +465,8 @@ type mspan struct {
 	// The next arena is populated as the spans request
 	// memory to hold gcmarkBits for the next GC cycle as well
 	// as allocBits for newly allocated spans.
+	// 注释：一个新的GC循环从调用finishsweep_m开始。finishsweep_m将上一个arena移到free arena，将当前arena移到上一个，将下一个arena移动到当前arena。
+	//		当跨度请求内存为下一个GC周期保存gcmarkBits以及为新分配的跨度保存allocBits时，会填充下一个arena。
 	//
 	// The pointer arithmetic is done "by hand" instead of using
 	// arrays to avoid bounds checks along critical performance
@@ -439,8 +474,11 @@ type mspan struct {
 	// The sweep will free the old allocBits and set allocBits to the
 	// gcmarkBits. The gcmarkBits are replaced with a fresh zeroed
 	// out memory.
-	allocBits  *gcBits
-	gcmarkBits *gcBits
+	// 注释：指针运算是“手动”完成的，而不是使用数组来避免沿关键性能路径进行边界检查。扫描将释放旧的allocBits，并将allocBit设置为gcmarkBits。gcmarkBits将替换为新的清零内存。
+	//
+	// 注释：连续数组空间首指针(对应的是一个uint8数组的首指针)(在申请时是个大的连续空间里截取出一段连续的gcBits空间)每8个字节一组，8字节对齐的位图
+	allocBits  *gcBits // 注释：(标记内存占用情况）8字节对齐的位图0未分配1已分配(uint8中每一位控制一个当前span的1块，会把其中64位补码放到缓存allocCache里，每种span的块数量固定【objects】位置：/src/runtime/sizeclasses.go)
+	gcmarkBits *gcBits // 注释：标记内存GC回收情况
 
 	// sweep generation:
 	// if sweepgen == h->sweepgen - 2, the span needs sweeping
@@ -449,22 +487,30 @@ type mspan struct {
 	// if sweepgen == h->sweepgen + 1, the span was cached before sweep began and is still cached, and needs sweeping
 	// if sweepgen == h->sweepgen + 3, the span was swept and then cached and is still cached
 	// h->sweepgen is incremented by 2 after every GC
+	// 注释：清理阶段
+	// 如果sweepgen == h->sweepgen - 2，【需要清理、未缓存】span(跨度)需要清扫标记。(注释：理解为重新清扫一下，因为每次清扫完成后会自动加2)
+	// 如果sweepgen == h->sweepgen - 1，【正在清理、未缓存】span(跨度)正在扫描标记。(注释：理解为重新清理过程中的状态，从新清理是-2,过程中会+1，所以状态为-1)
+	// 如果sweepgen == h->sweepgen，    【已经清理、未缓存】span(跨度)清扫标记完成，准备使用。
+	// 如果sweepgen == h->sweepgen + 1，【需要清理、已缓存】span(跨度)在扫描开始前在mcache缓存中，现在仍在mchche缓存中，需要扫描
+	// 如果sweepgen == h->sweepgen + 3，【无需清理、已缓存】span(跨度)已经被扫描，并放到mcache缓存中
+	// h->sweepgen在每次垃圾回收后会增加2。
 
-	sweepgen    uint32
+	sweepgen    uint32        // 注释：向 mheap.sweepgen 标记看齐
 	divMul      uint16        // for divide by elemsize - divMagic.mul
 	baseMask    uint16        // if non-0, elemsize is a power of 2, & this will get object allocation base
-	allocCount  uint16        // number of allocated objects
-	spanclass   spanClass     // size class and noscan (uint8)
-	state       mSpanStateBox // mSpanInUse etc; accessed atomically (get/set methods)
+	allocCount  uint16        // 注释：已分配块的个数(分配的对象数) // number of allocated objects
+	spanclass   spanClass     // 注释：span的ID(也叫做对象ID，对应【class】字段，位置：/src/runtime/sizeclasses.go) // size class and noscan (uint8)
+	state       mSpanStateBox // 注释：span的状态 // mSpanInUse etc; accessed atomically (get/set methods)
 	needzero    uint8         // needs to be zeroed before allocation
 	divShift    uint8         // for divide by elemsize - divMagic.shift
 	divShift2   uint8         // for divide by elemsize - divMagic.shift2
-	elemsize    uintptr       // computed from sizeclass or from npages
+	elemsize    uintptr       // 注释：存储的单个对象大小；(对应class表中的【bytes/obj】字段,地址:/src/runtime/sizeclasses.go) // computed from sizeclass or from npages
 	limit       uintptr       // end of data in span
 	speciallock mutex         // guards specials list
 	specials    *special      // linked list of special records sorted by offset.
 }
 
+// 注释：获取基地址
 func (s *mspan) base() uintptr {
 	return s.startAddr
 }
@@ -524,15 +570,18 @@ func recordspan(vh unsafe.Pointer, p unsafe.Pointer) {
 }
 
 // A spanClass represents the size class and noscan-ness of a span.
+// 注释：spanClass表示跨度的大小等级和范围。
 //
 // Each size class has a noscan spanClass and a scan spanClass. The
 // noscan spanClass contains only noscan objects, which do not contain
 // pointers and thus do not need to be scanned by the garbage
 // collector.
+// 注释：每个尺寸类都有一个noscan spanClass和一个scan spanClass。noscan spanClass只包含noscan对象，这些对象不包含指针，因此不需要垃圾收集器扫描。
+// 注释：spanClass是class对象的ID目前是0到67，一共有68个span个对象分类，spanClass代表每个分类的ID（classId）
 type spanClass uint8
 
 const (
-	numSpanClasses = _NumSizeClasses << 1
+	numSpanClasses = _NumSizeClasses << 1 // 注释：是class对象列表的两倍
 	tinySpanClass  = spanClass(tinySizeClass<<1 | 1)
 )
 
@@ -593,6 +642,7 @@ func (i arenaIdx) l2() uint {
 // inheap reports whether b is a pointer into a (potentially dead) heap object.
 // It returns false for pointers into mSpanManual spans.
 // Non-preemptible because it is used by write barriers.
+//
 //go:nowritebarrier
 //go:nosplit
 func inheap(b uintptr) bool {
@@ -1674,7 +1724,8 @@ func spanHasNoSpecials(s *mspan) {
 // offset & next, which this routine will fill in.
 // Returns true if the special was successfully added, false otherwise.
 // (The add will fail only if a record with the same p and s->kind
-//  already exists.)
+//
+//	already exists.)
 func addspecial(p unsafe.Pointer, s *special) bool {
 	span := spanOfHeap(uintptr(p))
 	if span == nil {
@@ -1868,13 +1919,17 @@ func freespecial(s *special, p unsafe.Pointer, size uintptr) {
 }
 
 // gcBits is an alloc/mark bitmap. This is always used as *gcBits.
+// 注释：gcBits是一个分配/标记位图。这总是被用作*gcBits。
 //
 //go:notinheap
 type gcBits uint8
 
 // bytep returns a pointer to the n'th byte of b.
+// 注释：bytep返回指向b的第n个字节的指针。
+// 注释：指针b偏移n个
+// 注释：可以理解为返回b[n]
 func (b *gcBits) bytep(n uintptr) *uint8 {
-	return addb((*uint8)(b), n)
+	return addb((*uint8)(b), n) // 注释：返回 b + n
 }
 
 // bitp returns a pointer to the byte containing bit n and a mask for

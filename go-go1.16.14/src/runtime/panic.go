@@ -219,6 +219,7 @@ func panicmemAddr(addr uintptr) {
 
 // Create a new deferred function fn with siz bytes of arguments.
 // The compiler turns a defer statement into a call to this.
+//
 //go:nosplit
 func deferproc(siz int32, fn *funcval) { // arguments of fn follow fn
 	gp := getg()
@@ -272,6 +273,7 @@ func deferproc(siz int32, fn *funcval) { // arguments of fn follow fn
 // the arguments of the defer.
 // Nosplit because the arguments on the stack won't be scanned
 // until the defer record is spliced into the gp._defer list.
+//
 //go:nosplit
 func deferprocStack(d *_defer) {
 	gp := getg()
@@ -321,6 +323,7 @@ const (
 )
 
 // defer size class for arg size sz
+//
 //go:nosplit
 func deferclass(siz uintptr) uintptr {
 	if siz <= minDeferArgs {
@@ -364,6 +367,7 @@ func testdefersizes() {
 
 // The arguments associated with a deferred call are stored
 // immediately after the _defer header in memory.
+//
 //go:nosplit
 func deferArgs(d *_defer) unsafe.Pointer {
 	if d.siz == 0 {
@@ -521,6 +525,7 @@ func freedeferfn() {
 // The single argument isn't actually used - it just has its address
 // taken so it can be matched against pending defers.
 // 注释：执行defer时调用此函数
+//
 //go:nosplit
 func deferreturn(arg0 uintptr) {
 	gp := getg()
@@ -917,9 +922,9 @@ func gopanic(e interface{}) {
 	}
 
 	var p _panic
-	p.arg = e          // 注释：设置panic的内容
-	p.link = gp._panic // 注释：panic的链表，把新的panic放在链表的头部
-	gp._panic = (*_panic)(noescape(unsafe.Pointer(&p)))
+	p.arg = e                                           // 注释：设置panic的内容
+	p.link = gp._panic                                  // 注释：panic的链表，把新的panic放在链表的头部
+	gp._panic = (*_panic)(noescape(unsafe.Pointer(&p))) // 注释：把panic放到链表的头部
 
 	atomic.Xadd(&runningPanicDefers, 1)
 
@@ -970,16 +975,16 @@ func gopanic(e interface{}) {
 				addOneOpenDeferFrame(gp, 0, nil)
 			}
 		} else {
-			p.argp = unsafe.Pointer(getargp(0))
-			reflectcall(nil, unsafe.Pointer(d.fn), deferArgs(d), uint32(d.siz), uint32(d.siz))
+			p.argp = unsafe.Pointer(getargp(0))                                                // 注释：记录当前栈请求参数的位置指针，访问下一个函数准备参数和返回值的位置地址。
+			reflectcall(nil, unsafe.Pointer(d.fn), deferArgs(d), uint32(d.siz), uint32(d.siz)) // 注释：这里会调用d.fn函数，就是refer里执行的函数
 		}
-		p.argp = nil
+		p.argp = nil // 注释：这里存放的是为d.fn函数（refer执行的函数）的入参地址，refer执行完后就清除掉
 
-		// reflectcall did not panic. Remove d.
-		if gp._defer != d {
+		// reflectcall did not panic. Remove d. // 注释：reflectcall没有panic。删除d。
+		if gp._defer != d { // 注释：如果当前G的defer不等于自己，说明这个G的defer被修改了，需要报错
 			throw("bad defer entry in panic")
 		}
-		d._panic = nil
+		d._panic = nil // 注释：d是refer，这个refer已经执行完成，所以需要清空refer里的panic
 
 		// trigger shrinkage to test stack copy. See stack_test.go:TestStackPanic
 		//GC()
@@ -1071,11 +1076,15 @@ func gopanic(e interface{}) {
 
 // getargp returns the location where the caller
 // writes outgoing function call arguments.
+// 注释：getargp返回调用者编写传出函数调用参数的位置。
+// 注释：这里比较有意思，就是把入参拷贝的函数内的变量（第一个入参变量），获取地址并且返回（就是上一个函数栈准备的入参位置的地址）
+// 注释：（这里准备的大小为18字节，8字节是入参，8字节是返回值）
+//
 //go:nosplit
 //go:noinline
 func getargp(x int) uintptr {
-	// x is an argument mainly so that we can return its address.
-	return uintptr(noescape(unsafe.Pointer(&x)))
+	// x is an argument mainly so that we can return its address. // 注释：x是一个参数，主要是为了返回它的地址。
+	return uintptr(noescape(unsafe.Pointer(&x))) // 注释：返回上一个函数栈实参的栈地址
 }
 
 // The implementation of the predeclared function recover.
@@ -1084,6 +1093,7 @@ func getargp(x int) uintptr {
 //
 // TODO(rsc): Once we commit to CopyStackAlways,
 // this doesn't need to be nosplit.
+//
 //go:nosplit
 func gorecover(argp uintptr) interface{} {
 	// Must be in a function running as part of a deferred call during the panic.
@@ -1106,10 +1116,13 @@ func sync_throw(s string) {
 	throw(s)
 }
 
+// 注释：抛出错误
+//
 //go:nosplit
 func throw(s string) {
 	// Everything throw does should be recursively nosplit so it
 	// can be called even when it's unsafe to grow the stack.
+	// 注释：throw所做的一切都应该是递归的nosplit，这样即使在增长堆栈不安全的情况下也可以调用它。
 	systemstack(func() {
 		print("fatal error: ", s, "\n")
 	})
@@ -1118,7 +1131,7 @@ func throw(s string) {
 		gp.m.throwing = 1
 	}
 	fatalthrow()
-	*(*int)(nil) = 0 // not reached
+	*(*int)(nil) = 0 // not reached // 注释：未到达
 }
 
 // runningPanicDefers is non-zero while running deferred functions for panic.
@@ -1161,6 +1174,7 @@ func recovery(gp *g) {
 // fatalthrow implements an unrecoverable runtime throw. It freezes the
 // system, prints stack traces starting from its caller, and terminates the
 // process.
+// 注释：fatalthrow实现了一个不可恢复的运行时抛出。它冻结系统，从调用程序开始打印堆栈跟踪，并终止进程。
 //
 //go:nosplit
 func fatalthrow() {
@@ -1176,6 +1190,7 @@ func fatalthrow() {
 			// crash uses a decent amount of nosplit stack and we're already
 			// low on stack in throw, so crash on the system stack (unlike
 			// fatalpanic).
+			// 注释：crash使用了相当多的nosplit堆栈，而我们在throw中的堆栈已经很低了，所以在系统堆栈上崩溃（不像致命恐慌）。
 			crash()
 		}
 

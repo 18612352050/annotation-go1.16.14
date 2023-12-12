@@ -81,9 +81,9 @@ var modinfo string
 // for nmspinning manipulation.
 
 var (
-	m0           m // 注释：代表进程的主线程
-	g0           g // 注释：m0的g0，也就是m0.g0 = &g0
-	mcache0      *mcache
+	m0           m       // 注释：代表进程的主线程
+	g0           g       // 注释：m0的g0，也就是m0.g0 = &g0
+	mcache0      *mcache // 注释：（P0的内存缓存）引导程序mcache0。P的ID为0的将获得mcache0
 	raceprocctx0 uintptr
 )
 
@@ -816,15 +816,16 @@ func ready(gp *g, traceskip int, next bool) {
 
 // freezeStopWait is a large value that freezetheworld sets
 // sched.stopwait to in order to request that all Gs permanently stop.
+// 注释：freezetheworld是一个很大的值，freezetheworld将sched.stopwait设置为，以请求永久停止所有G。
 const freezeStopWait = 0x7fffffff
 
 // freezing is set to non-zero if the runtime is trying to freeze the
 // world.
 var freezing uint32
 
-// Similar to stopTheWorld but best-effort and can be called several times.
-// There is no reverse operation, used during crashing.
-// This function must not lock any mutexes.
+// Similar to stopTheWorld but best-effort and can be called several times. // 注释：类似于stopTheWorld，但尽了最大努力，可以叫几次。
+// There is no reverse operation, used during crashing. // 注释：没有在崩溃期间使用的反向操作。
+// This function must not lock any mutexes. // 注释：此函数不能锁定任何互斥对象。
 func freezetheworld() {
 	atomic.Store(&freezing, 1)
 	// stopwait and preemption requests can be lost
@@ -1734,22 +1735,24 @@ func syscall_runtime_doAllThreadsSyscall(fn func(bool) bool) {
 // _Psyscall to avoid a race where forEachP sees that the P is running
 // just before the P goes into _Pidle/_Psyscall and neither forEachP
 // nor the P run the safe-point function.
+// 注释：必须在向_Pidle或_Psyscall的任何转换中检查runSafePointFn，以避免发生竞争，即forEachP在P进入_Pidle/Psyscall之前看到P正在运行，并且forEachP和P都没有运行安全点函数。
+// 注释：安全节点检查，避免数据竞争
 func runSafePointFn() {
 	p := getg().m.p.ptr()
 	// Resolve the race between forEachP running the safe-point
 	// function on this P's behalf and this P running the
 	// safe-point function directly.
 	// 注释：把p.runSafePointFn从1设置为0
-	if !atomic.Cas(&p.runSafePointFn, 1, 0) {
+	if !atomic.Cas(&p.runSafePointFn, 1, 0) { // 注释：是否有安全节点函数0否1是，如果是1则设置为0并且返回true，并把布尔值取反
 		return
 	}
-	sched.safePointFn(p)
-	lock(&sched.lock)
-	sched.safePointWait--
+	sched.safePointFn(p)  // 注释：执行安全节点函数，把当前P放进去，检查是否有数据冲突（检测数据竞争）
+	lock(&sched.lock)     // 注释：加锁
+	sched.safePointWait-- // 注释：安全节点数量递减
 	if sched.safePointWait == 0 {
-		notewakeup(&sched.safePointNote)
+		notewakeup(&sched.safePointNote) // 注释：如果安全节点safePointWait为0时唤醒安全节点的M
 	}
-	unlock(&sched.lock)
+	unlock(&sched.lock) // 注释：解锁
 }
 
 // When running with cgo, we call _cgo_thread_start
@@ -3590,28 +3593,32 @@ func save(pc, sp uintptr) {
 	}
 }
 
-// The goroutine g is about to enter a system call.
-// Record that it's not using the cpu anymore.
-// This is called only from the go syscall library and cgocall,
-// not from the low-level system calls used by the runtime.
+// The goroutine g is about to enter a system call. 			// 注释：goroutine g即将进入系统调用。
+// Record that it's not using the cpu anymore.					// 注释：记录它不再使用cpu。
+// This is called only from the go syscall library and cgocall, // 注释：这只能从go系统调用库和cgocall调用，
+// not from the low-level system calls used by the runtime. 	// 注释：而不是来自运行时使用的低级系统调用。
 //
 // Entersyscall cannot split the stack: the gosave must
 // make g->sched refer to the caller's stack segment, because
 // entersyscall is going to return immediately after.
+// 注释：Entersyscall无法拆分堆栈：gosave必须使g->sched引用调用方的堆栈段，因为Entersyscall将在之后立即返回。
 //
-// Nothing entersyscall calls can split the stack either.
-// We cannot safely move the stack during an active call to syscall,
+// Nothing entersyscall calls can split the stack either. // 注释：entersyscall调用也不能拆分堆栈。
+// We cannot safely move the stack during an active call to syscall, // 注释：在对系统调用的活动调用期间，我们无法安全地移动堆栈，
 // because we do not know which of the uintptr arguments are
-// really pointers (back into the stack).
+// really pointers (back into the stack). // 注释：因为我们不知道哪个uintptr参数是真正的指针（返回堆栈）。
 // In practice, this means that we make the fast path run through
 // entersyscall doing no-split things, and the slow path has to use systemstack
 // to run bigger things on the system stack.
+// 注释：在实践中，这意味着我们让快速路径通过entersyscall运行，而不进行拆分，而慢速路径必须使用systemstack在系统堆栈上运行更大的东西。
 //
 // reentersyscall is the entry point used by cgo callbacks, where explicitly
 // saved SP and PC are restored. This is needed when exitsyscall will be called
 // from a function further up in the call stack than the parent, as g->syscallsp
 // must always point to a valid stack frame. entersyscall below is the normal
 // entry point for syscalls, which obtains the SP and PC from the caller.
+// 注释：returnersyscall是cgo回调使用的入口点，显式保存的SP和PC将在这里恢复。当exitsyscall将从调用堆栈中比父函数更靠上的函数调用时，
+// 注释：需要这样做，因为g->syscallsp必须始终指向有效的堆栈帧。下面的entersyscall是syscalls的正常入口点，它从调用方获取SP和PC。
 //
 // Syscall tracing:
 // At the start of a syscall we emit traceGoSysCall to capture the stack trace.
@@ -3626,62 +3633,69 @@ func save(pc, sp uintptr) {
 // Note that the increment is done even if tracing is not enabled,
 // because tracing can be enabled in the middle of syscall. We don't want the wait to hang.
 //
+// 注释：系统调用的前置函数，
+// 注释：主要动作：
+// 注释：标记栈抢占请求； 禁止栈拆分； 保存现场（PC、SP和G）； 栈追踪； 唤醒等待的M； 安全节点检查避免数据竞争； 把当前P放到m.oldp里； 解除M和P的绑定；
+// 注释：把P的状态设置成系统调用(_Psyscall)；判断是否开启GC，如果GC开启则把当前的P进入停止，如果当前的P是最后一个P时则运行GC，P的数量默认是系统核数
 //go:nosplit
 func reentersyscall(pc, sp uintptr) {
-	_g_ := getg()
+	_g_ := getg() // 注释：获取G，在TLS中获取G指针
 
 	// Disable preemption because during this function g is in Gsyscall status,
 	// but can have inconsistent g->sched, do not let GC observe it.
-	_g_.m.locks++
+	_g_.m.locks++ // 注释：禁用抢占，因为在这个函数中，g处于Gsyscall状态，但可能有不一致的g->sched，不要让GC观察它。
 
 	// Entersyscall must not call any function that might split/grow the stack.
 	// (See details in comment above.)
 	// Catch calls that might, by replacing the stack guard with something that
 	// will trip any stack check and leaving a flag to tell newstack to die.
-	_g_.stackguard0 = stackPreempt
-	_g_.throwsplit = true
+	// 注释：Entersyscall不能调用任何可能拆分/增长堆栈的函数。（请参阅上面评论中的详细信息。）捕获可能的调用，
+	// 注释：方法是用会触发任何堆栈检查的东西替换堆栈保护，并留下一个标志来告诉newstack死亡。
+	_g_.stackguard0 = stackPreempt // 注释：标记栈抢占请求
+	_g_.throwsplit = true          // 注释：禁止栈拆分
 
-	// Leave SP around for GC and traceback.
-	save(pc, sp)
-	_g_.syscallsp = sp
-	_g_.syscallpc = pc
-	casgstatus(_g_, _Grunning, _Gsyscall)
-	if _g_.syscallsp < _g_.stack.lo || _g_.stack.hi < _g_.syscallsp {
+	// Leave SP around for GC and traceback. // 注释：保留SP以进行GC和回溯。
+	save(pc, sp)                                                      // 注释：保存现场
+	_g_.syscallsp = sp                                                // 注释：设置系统调用时的SP值
+	_g_.syscallpc = pc                                                // 注释：设置系统调用时的PC值
+	casgstatus(_g_, _Grunning, _Gsyscall)                             // 注释：设置系统的调用的状态码
+	if _g_.syscallsp < _g_.stack.lo || _g_.stack.hi < _g_.syscallsp { // 注释：判断SP入股没有在栈地址范围内则报错
 		systemstack(func() {
 			print("entersyscall inconsistent ", hex(_g_.syscallsp), " [", hex(_g_.stack.lo), ",", hex(_g_.stack.hi), "]\n")
 			throw("entersyscall")
 		})
 	}
 
-	if trace.enabled {
-		systemstack(traceGoSysCall)
+	if trace.enabled { // 注释：如果栈追踪开启
+		systemstack(traceGoSysCall) // 注释：切换到系统栈，执行栈追踪
 		// systemstack itself clobbers g.sched.{pc,sp} and we might
 		// need them later when the G is genuinely blocked in a
 		// syscall
-		save(pc, sp)
+		save(pc, sp) // 注释：再次保存现场
 	}
 
-	if atomic.Load(&sched.sysmonwait) != 0 {
-		systemstack(entersyscall_sysmon)
-		save(pc, sp)
+	if atomic.Load(&sched.sysmonwait) != 0 { // 注释：判断是否有等待的M，如果有则唤醒它
+		systemstack(entersyscall_sysmon) // 注释：（系统栈运行）唤醒等待的M
+		save(pc, sp)                     // 注释：重新保存现场
 	}
 
-	if _g_.m.p.ptr().runSafePointFn != 0 {
+	if _g_.m.p.ptr().runSafePointFn != 0 { // 注释：安全节点检查，以避免发生竞争
 		// runSafePointFn may stack split if run on this stack
-		systemstack(runSafePointFn)
-		save(pc, sp)
+		// 注释：如果在此堆栈上运行，runSafePointFn可能会进行堆栈拆分
+		systemstack(runSafePointFn) // 注释：在系统栈上运行，安全节点检查（检查数据竞争）
+		save(pc, sp)                // 注释：再次保存现场
 	}
 
-	_g_.m.syscalltick = _g_.m.p.ptr().syscalltick
-	_g_.sysblocktraced = true
-	pp := _g_.m.p.ptr()
-	pp.m = 0
-	_g_.m.oldp.set(pp)
-	_g_.m.p = 0
-	atomic.Store(&pp.status, _Psyscall)
-	if sched.gcwaiting != 0 {
-		systemstack(entersyscall_gcwait)
-		save(pc, sp)
+	_g_.m.syscalltick = _g_.m.p.ptr().syscalltick // 注释：保存P里的系统调度计数器，P每一次系统调用加1
+	_g_.sysblocktraced = true                     // 设置系统调用的，系统追踪
+	pp := _g_.m.p.ptr()                           // 注释：获取当前G对应的P
+	pp.m = 0                                      // 注释：（解除P和M的绑定）断开当前G对对应P和M
+	_g_.m.oldp.set(pp)                            // 注释：把当前的P存放起来
+	_g_.m.p = 0                                   // 注释：（解除M和P的绑定）断开当前G对应M对应P
+	atomic.Store(&pp.status, _Psyscall)           // 注释：把P的状态设置成系统调用(_Psyscall)
+	if sched.gcwaiting != 0 {                     // 注释：是否开启GC，如果开启，并且是等待GC的状态非0时，执行，把当前的P也进入等待节点，如果是最后一个P时（所有的P都停止了）执行GC
+		systemstack(entersyscall_gcwait) // 注释：(停止当前的P)系统栈执行停止当前P
+		save(pc, sp)                     // 注释：再次保存现场
 	}
 
 	_g_.m.locks--
@@ -3691,10 +3705,12 @@ func reentersyscall(pc, sp uintptr) {
 //
 // This is exported via linkname to assembly in the syscall package.
 //
+// 注释：进入系统调用前执行的前置方法【系统调用的汇编方法：TEXT ·Syscall(SB)】
+//
 //go:nosplit
 //go:linkname entersyscall
 func entersyscall() {
-	reentersyscall(getcallerpc(), getcallersp())
+	reentersyscall(getcallerpc(), getcallersp()) // 注释：系统调用的前置函数
 }
 
 func entersyscall_sysmon() {
@@ -3706,19 +3722,20 @@ func entersyscall_sysmon() {
 	unlock(&sched.lock)
 }
 
+// 注释：(停止当前的P)系统栈执行停止当前P（STW时进入系统调用进入这个等待函数）
 func entersyscall_gcwait() {
-	_g_ := getg()
-	_p_ := _g_.m.oldp.ptr()
+	_g_ := getg()           // 注释：获取当前的G
+	_p_ := _g_.m.oldp.ptr() // 注释：获取系统调用时存放的旧的P的对象（就是执行系统调用前的P）
 
-	lock(&sched.lock)
-	if sched.stopwait > 0 && atomic.Cas(&_p_.status, _Psyscall, _Pgcstop) {
-		if trace.enabled {
-			traceGoSysBlock(_p_)
-			traceProcStop(_p_)
+	lock(&sched.lock)                                                       // 注释：全局调度锁，加锁
+	if sched.stopwait > 0 && atomic.Cas(&_p_.status, _Psyscall, _Pgcstop) { // 注释：把系统调用状态更改成功停止状态（GC导致的停止）
+		if trace.enabled { //注释：如果开启栈追踪
+			traceGoSysBlock(_p_) // 注释：系统调用停止时的栈追踪
+			traceProcStop(_p_)   // 注释：(栈追踪)线程停止事件
 		}
-		_p_.syscalltick++
-		if sched.stopwait--; sched.stopwait == 0 {
-			notewakeup(&sched.stopnote)
+		_p_.syscalltick++                          // 注释：系统调度计数器，每一次系统调用加1
+		if sched.stopwait--; sched.stopwait == 0 { // 注释：当所有的P都停止时执行(sched.stopwait默认是P的个数)
+			notewakeup(&sched.stopnote) // 注释：唤醒CG的M节点
 		}
 	}
 	unlock(&sched.lock)
@@ -3775,30 +3792,33 @@ func entersyscallblock_handoff() {
 	handoffp(releasep())
 }
 
-// The goroutine g exited its system call.
-// Arrange for it to run on a cpu again.
+// The goroutine g exited its system call. // 注释：goroutine g退出了系统调用。
+// Arrange for it to run on a cpu again. 	// 注释：安排它再次在cpu上运行。
 // This is called only from the go syscall library, not
 // from the low-level system calls used by the runtime.
+// 注释：这只能从go系统调用库中调用，而不能从运行时使用的低级系统调用中调用。
 //
-// Write barriers are not allowed because our P may have been stolen.
+// Write barriers are not allowed because our P may have been stolen. // 注释：写障碍是不允许的，因为我们的P可能被盗了。
 //
-// This is exported via linkname to assembly in the syscall package.
+// This is exported via linkname to assembly in the syscall package. // 注释：这是通过链接名导出到系统调用包中的程序集的。
+//
+// 注释：系统调用后置动作
 //
 //go:nosplit
 //go:nowritebarrierrec
 //go:linkname exitsyscall
 func exitsyscall() {
-	_g_ := getg()
+	_g_ := getg() // 注释：获取当前G
 
-	_g_.m.locks++ // see comment in entersyscall
-	if getcallersp() > _g_.syscallsp {
+	_g_.m.locks++                      // 注释：给M加锁 // see comment in entersyscall
+	if getcallersp() > _g_.syscallsp { // 注释：判断单签SP是否是大于系统SP(如果大于说明在系统调用之后的SP，所以需要报错)
 		throw("exitsyscall: syscall frame is no longer valid")
 	}
 
-	_g_.waitsince = 0
-	oldp := _g_.m.oldp.ptr()
-	_g_.m.oldp = 0
-	if exitsyscallfast(oldp) {
+	_g_.waitsince = 0          // 注释：清空阻塞的时间
+	oldp := _g_.m.oldp.ptr()   // 注释：取出系统调用前的P的指针
+	_g_.m.oldp = 0             // 注释：清空存放系统调用前的P的指针
+	if exitsyscallfast(oldp) { // 注释：尝试执行快速系统调用后置函数
 		if trace.enabled {
 			if oldp != _g_.m.p.ptr() || _g_.m.syscalltick != _g_.m.p.ptr().syscalltick {
 				systemstack(traceGoStart)
@@ -3860,19 +3880,20 @@ func exitsyscall() {
 	_g_.throwsplit = false
 }
 
+// 注释：系统调用快速后置函数
 //go:nosplit
 func exitsyscallfast(oldp *p) bool {
-	_g_ := getg()
+	_g_ := getg() // 注释：获取当前G
 
-	// Freezetheworld sets stopwait but does not retake P's.
-	if sched.stopwait == freezeStopWait {
+	// Freezetheworld sets stopwait but does not retake P's. // 注释：Freezetheworld设置了stopwait，但没有重夺P。
+	if sched.stopwait == freezeStopWait { // 注释：如果是冻结状态的直接返回false
 		return false
 	}
 
-	// Try to re-acquire the last P.
-	if oldp != nil && oldp.status == _Psyscall && atomic.Cas(&oldp.status, _Psyscall, _Pidle) {
+	// Try to re-acquire the last P. // 注释：尝试重新获取最后一个P。
+	if oldp != nil && oldp.status == _Psyscall && atomic.Cas(&oldp.status, _Psyscall, _Pidle) { // 注释：如果成功把系统调用前的P的状态从系统调用更改为空闲状态
 		// There's a cpu for us, so we can run.
-		wirep(oldp)
+		wirep(oldp) // 注释：当前线程m和p相互绑定，并且把p的状态从_Pidle设置成_Prunning
 		exitsyscallfast_reacquired()
 		return true
 	}
@@ -3903,6 +3924,7 @@ func exitsyscallfast(oldp *p) bool {
 // exitsyscallfast_reacquired is the exitsyscall path on which this G
 // has successfully reacquired the P it was running on before the
 // syscall.
+// 注释：exitsyscallfast_reacquired是exitsyscall路径，在该路径上，该G已成功重新获取其在6系统调用之前运行的P。
 //
 //go:nosplit
 func exitsyscallfast_reacquired() {
@@ -4143,7 +4165,7 @@ func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerp
 	_g_ := getg() // 注释：获取tls(FS寄存器的值)里的G的地址
 
 	if fn == nil {
-		_g_.m.throwing = -1 // do not dump full stacks
+		_g_.m.throwing = -1 // do not dump full stacks // 注释：不要转储完整的堆栈
 		throw("go of nil func value")
 	}
 	acquirem()           // 注释：获取M并加锁，这里没有用到返回值，所以是单纯的加锁，禁止被抢占 // disable preemption because it can be holding p in a local var
@@ -4810,6 +4832,7 @@ func (pp *p) init(id int32) {
 			}
 			// Use the bootstrap mcache0. Only one P will get
 			// mcache0: the one with ID 0.
+			// 注释：使用引导程序mcache0。只有一个P将获得mcache0：ID为0的那个。
 			pp.mcache = mcache0
 		} else {
 			pp.mcache = allocmcache()
@@ -5023,7 +5046,7 @@ func procresize(nprocs int32) *p {
 	}
 
 	// g.m.p is now set, so we no longer need mcache0 for bootstrapping.
-	mcache0 = nil
+	mcache0 = nil // 注释：g.m.p现已设置，因此我们不再需要mcache0进行引导。
 
 	// release resources from unused P's
 	for i := nprocs; i < old; i++ {

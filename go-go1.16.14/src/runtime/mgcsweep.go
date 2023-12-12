@@ -32,6 +32,7 @@ import (
 var sweep sweepdata
 
 // State of background sweep.
+// 注释：后台扫描（background sweep）的状态
 type sweepdata struct {
 	lock    mutex
 	g       *g
@@ -45,25 +46,30 @@ type sweepdata struct {
 	// It represents an index into the mcentral span
 	// sets. Accessed and updated via its load and
 	// update methods. Not protected by a lock.
+	// 注释：centralIndex 是当前未扫描的 span 类。它表示 mcentral span 集中的一个索引。通过其加载和更新方法访问和更新。不受锁的保护。
 	//
 	// Reset at mark termination.
 	// Used by mheap.nextSpanForSweep.
-	centralIndex sweepClass
+	// 注释：在标记终止时重置。由 mheap.nextSpanForSweep 使用。
+	//
+	centralIndex sweepClass // 注释：(当前未清理)需要清扫mcentral中的span对象ID
 }
 
 // sweepClass is a spanClass and one bit to represent whether we're currently
 // sweeping partial or full spans.
-type sweepClass uint32
+type sweepClass uint32 // 注释：span的对象ID和所属队列标识，最有一位是1表示无空闲(full)队列，0表示有空闲(partial)队列
 
 const (
 	numSweepClasses            = numSpanClasses * 2
 	sweepClassDone  sweepClass = sweepClass(^uint32(0))
 )
 
+// 注释：获取数据
 func (s *sweepClass) load() sweepClass {
 	return sweepClass(atomic.Load((*uint32)(s)))
 }
 
+// 注释：更新数据
 func (s *sweepClass) update(sNew sweepClass) {
 	// Only update *s if its current value is less than sNew,
 	// since *s increases monotonically.
@@ -78,6 +84,7 @@ func (s *sweepClass) update(sNew sweepClass) {
 	// like RISC-V however have native support for an atomic max.
 }
 
+// 注释：清楚数据
 func (s *sweepClass) clear() {
 	atomic.Store((*uint32)(s), 0)
 }
@@ -86,6 +93,8 @@ func (s *sweepClass) clear() {
 // whether we're interested in the full or partial
 // unswept lists for that class, indicated as a boolean
 // (true means "full").
+// 注释：拆分数据
+// 注释：返回span的对象ID和所属队列标识，最有一位是1表示无空闲(full)队列，0表示有空闲(partial)队列
 func (s sweepClass) split() (spc spanClass, full bool) {
 	return spanClass(s >> 1), s&1 == 0
 }
@@ -93,16 +102,18 @@ func (s sweepClass) split() (spc spanClass, full bool) {
 // nextSpanForSweep finds and pops the next span for sweeping from the
 // central sweep buffers. It returns ownership of the span to the caller.
 // Returns nil if no such span exists.
+//
+// 注释：找一下个要清理的span，如果没有要清理的则返回nil
 func (h *mheap) nextSpanForSweep() *mspan {
 	sg := h.sweepgen
-	for sc := sweep.centralIndex.load(); sc < numSweepClasses; sc++ {
-		spc, full := sc.split()
+	for sc := sweep.centralIndex.load(); sc < numSweepClasses; sc++ { // 注释：获取spanClass的ID，从这个ID开始循环所有ID(numSweepClasses是4倍的span对象ID总数)
+		spc, full := sc.split() // 注释：分隔成cpan对象ID和是否需要扫描标识
 		c := &h.central[spc].mcentral
 		var s *mspan
-		if full {
-			s = c.fullUnswept(sg).pop()
+		if full { // 注释：比较是否未被GC扫描
+			s = c.fullUnswept(sg).pop() // 注释：从无空闲span并且未被GC扫描的链表中的获取
 		} else {
-			s = c.partialUnswept(sg).pop()
+			s = c.partialUnswept(sg).pop() // 注释：从有空闲span并且未被GC扫描的链表中的获取
 		}
 		if s != nil {
 			// Write down that we found something so future sweepers
@@ -185,24 +196,27 @@ func bgsweep(c chan int) {
 
 // sweepone sweeps some unswept heap span and returns the number of pages returned
 // to the heap, or ^uintptr(0) if there was nothing to sweep.
+// 注释：是清理（sweep）未清理的堆跨度（heap span），并返回归还给堆的页面数量。如果没有需要清理的内容，则返回^uintptr(0)。
+// 注释：清理一个
 func sweepone() uintptr {
 	_g_ := getg()
 	sweepRatio := mheap_.sweepPagesPerByte // For debugging
 
 	// increment locks to ensure that the goroutine is not preempted
 	// in the middle of sweep thus leaving the span in an inconsistent state for next GC
-	_g_.m.locks++
-	if atomic.Load(&mheap_.sweepdone) != 0 {
+	_g_.m.locks++                            // 注释：加锁
+	if atomic.Load(&mheap_.sweepdone) != 0 { // 注释：如果所有的span都被扫描过了则解锁并返回没有需要清理标识
 		_g_.m.locks--
 		return ^uintptr(0)
 	}
-	atomic.Xadd(&mheap_.sweepers, +1)
+	atomic.Xadd(&mheap_.sweepers, +1) // 注释：标记活动数加一
 
 	// Find a span to sweep.
-	var s *mspan
+	// 注释：查找一个span并且清理
+	var s *mspan // 注释：准备存储下一个要被清理的span
 	sg := mheap_.sweepgen
 	for {
-		s = mheap_.nextSpanForSweep()
+		s = mheap_.nextSpanForSweep() // 注释：找一下个要清理的span，如果没有要清理的则返回nil
 		if s == nil {
 			atomic.Store(&mheap_.sweepdone, 1)
 			break
@@ -317,14 +331,15 @@ func (s *mspan) ensureSwept() {
 // Returns true if the span was returned to heap.
 // If preserve=true, don't return it to heap nor relink in mcentral lists;
 // caller takes care of it.
+// 注释：执行清理动作
 func (s *mspan) sweep(preserve bool) bool {
 	// It's critical that we enter this function with preemption disabled,
 	// GC must not start while we are in the middle of this function.
-	_g_ := getg()
+	_g_ := getg() // 注释：获取当前G
 	if _g_.m.locks == 0 && _g_.m.mallocing == 0 && _g_ != _g_.m.g0 {
 		throw("mspan.sweep: m is not locked")
 	}
-	sweepgen := mheap_.sweepgen
+	sweepgen := mheap_.sweepgen // 注释：获取GC清理计数器
 	if state := s.state.get(); state != mSpanInUse || s.sweepgen != sweepgen-1 {
 		print("mspan.sweep: state=", state, " sweepgen=", s.sweepgen, " mheap.sweepgen=", sweepgen, "\n")
 		throw("mspan.sweep: bad span state")
@@ -620,29 +635,35 @@ func (s *mspan) reportZombies() {
 // performs sweeping to prevent going in to debt. If the caller will
 // also sweep pages (e.g., for a large allocation), it can pass a
 // non-zero callerSweepPages to leave that many pages unswept.
+// 注释：reduceSweepCredit扣除分配大小为spanBytes的span的扫描信用。这必须在分配span之前执行，以确保系统有足够的信用。
+//		如有必要，它会进行彻底的清理，以防止陷入债务。如果调用方还将扫描页面（例如，对于大的分配），则它可以传递一个非零的callerWeepPages，使许多页面不被扫描。
 //
 // deductSweepCredit makes a worst-case assumption that all spanBytes
 // bytes of the ultimately allocated span will be available for object
 // allocation.
+// 注释：reduceSweepCredit做了一个最坏的假设，即最终分配的跨度的所有spanBytes字节都将可用于对象分配。
 //
 // deductSweepCredit is the core of the "proportional sweep" system.
 // It uses statistics gathered by the garbage collector to perform
 // enough sweeping so that all pages are swept during the concurrent
 // sweep phase between GC cycles.
+// 注释：reduceSweepCredit是“比例扫描”系统的核心。它使用垃圾收集器收集的统计信息来执行足够的扫描，以便在GC周期之间的并发扫描阶段扫描所有页面。
 //
 // mheap_ must NOT be locked.
+//
+// 注释：减低清理积分spanBytes是一个span的大小
 func deductSweepCredit(spanBytes uintptr, callerSweepPages uintptr) {
 	if mheap_.sweepPagesPerByte == 0 {
 		// Proportional sweep is done or disabled.
 		return
 	}
 
-	if trace.enabled {
-		traceGCSweepStart()
+	if trace.enabled { // 注释：是否开启链路追踪
+		traceGCSweepStart() // 注释：GC链路追踪
 	}
 
 retry:
-	sweptBasis := atomic.Load64(&mheap_.pagesSweptBasis)
+	sweptBasis := atomic.Load64(&mheap_.pagesSweptBasis) // 注释：清扫扫描的起始位置
 
 	// Fix debt if necessary.
 	newHeapLive := uintptr(atomic.Load64(&memstats.heap_live)-mheap_.sweepHeapLiveBasis) + spanBytes

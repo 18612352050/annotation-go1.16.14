@@ -35,11 +35,13 @@ var deBruijnIdx32ctz = [32]byte{
 
 // Ctz64 counts trailing (low-order) zeroes,
 // and if all are zero, then 64.
+// 注释：Ctz64计数结尾（低位）零，如果全部为零，则为64。
+// 注释：(返回尾部0的个数)返回地位的0的个数
 func Ctz64(x uint64) int {
-	x &= -x                       // isolate low-order bit
-	y := x * deBruijn64ctz >> 58  // extract part of deBruijn sequence
-	i := int(deBruijnIdx64ctz[y]) // convert to bit index
-	z := int((x - 1) >> 57 & 64)  // adjustment if zero
+	x &= -x                       // 注释：获取到右边第一个1的值(比如：1010100值为100) // isolate low-order bit
+	y := x * deBruijn64ctz >> 58  // 注释：把一个大数字转换成数组的下标(2的n次方减去n,这里是2的6次方减去6等于58) // extract part of deBruijn sequence
+	i := int(deBruijnIdx64ctz[y]) // 注释：用数组映射对应的位数 // convert to bit index
+	z := int((x - 1) >> 57 & 64)  // 注释：对0单独处理，如果是0则返回64（这个方式省去了用if语句了） // adjustment if zero
 	return i + z
 }
 
@@ -47,7 +49,7 @@ func Ctz64(x uint64) int {
 // and if all are zero, then 32.
 func Ctz32(x uint32) int {
 	x &= -x                       // isolate low-order bit
-	y := x * deBruijn32ctz >> 27  // extract part of deBruijn sequence
+	y := x * deBruijn32ctz >> 27  // 注释：把一个大数字转换成数组的下标(2的n次方减去n,这里是2的5次方减去5等于27) // extract part of deBruijn sequence
 	i := int(deBruijnIdx32ctz[y]) // convert to bit index
 	z := int((x - 1) >> 26 & 32)  // adjustment if zero
 	return i + z
@@ -60,20 +62,21 @@ func Ctz8(x uint8) int {
 
 // Bswap64 returns its input with byte order reversed
 // 0x0102030405060708 -> 0x0807060504030201
+// 注释：字节翻转
 func Bswap64(x uint64) uint64 {
-	c8 := uint64(0x00ff00ff00ff00ff)
-	a := x >> 8 & c8
-	b := (x & c8) << 8
-	x = a | b
-	c16 := uint64(0x0000ffff0000ffff)
-	a = x >> 16 & c16
-	b = (x & c16) << 16
-	x = a | b
-	c32 := uint64(0x00000000ffffffff)
-	a = x >> 32 & c32
-	b = (x & c32) << 32
-	x = a | b
-	return x
+	c8 := uint64(0x00ff00ff00ff00ff)  // 注释：8位的奇偶数掩码
+	a := x >> 8 & c8                  // 注释：获取偶数并右移8位
+	b := (x & c8) << 8                // 注释：取出奇数并且左移8位
+	x = a | b                         // 注释：8位的奇数和偶数调换位置
+	c16 := uint64(0x0000ffff0000ffff) // 注释：16位的奇偶数掩码
+	a = x >> 16 & c16                 // 注释：获取偶数并右移16位
+	b = (x & c16) << 16               // 注释：获取奇数并左移16位
+	x = a | b                         // 注释：16位的奇数和偶数调换位置
+	c32 := uint64(0x00000000ffffffff) // 注释：32位的奇偶数掩码
+	a = x >> 32 & c32                 // 注释：获取偶数并右移32位
+	b = (x & c32) << 32               // 注释：获取奇数并左移32位
+	x = a | b                         // 注释：32位的奇数和偶数调换位置
+	return x                          // 注释：返回翻转结果
 }
 
 // Bswap32 returns its input with byte order reversed
