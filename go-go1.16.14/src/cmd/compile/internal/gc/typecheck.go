@@ -201,6 +201,7 @@ var typecheck_tcstack []*Node
 // 	n.Left = typecheck(n.Left, top)
 func typecheck(n *Node, top int) (res *Node) {
 	// cannot type check until all the source has been parsed
+	//在loadsys执行完成之后才能再次执行
 	if !typecheckok {
 		Fatalf("early typecheck")
 	}
@@ -217,6 +218,7 @@ func typecheck(n *Node, top int) (res *Node) {
 	lno := setlineno(n)
 
 	// Skip over parens.
+	// 跳过括号
 	for n.Op == OPAREN {
 		n = n.Left
 	}

@@ -868,7 +868,7 @@ const (
 	OPANIC       // panic(Left)
 	OPRINT       // print(List)
 	OPRINTN      // println(List)
-	OPAREN       // (Left)
+	OPAREN       // (Left)  括号
 	OSEND        // Left <- Right
 	OSLICE       // Left[List[0] : List[1]] (Left is untypechecked or slice)
 	OSLICEARR    // Left[List[0] : List[1]] (Left is array)

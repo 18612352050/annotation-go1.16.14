@@ -41,6 +41,8 @@ func (f bitset32) get2(shift uint8) uint8 {
 // set2 sets two bits in f using the bottom two bits of b.
 func (f *bitset32) set2(shift uint8, b uint8) {
 	// Clear old bits.
+	//先执行3 << 5变成01100000
+	//&^=是按位异或，a &^= b即过滤掉b中为1的位
 	*(*uint32)(f) &^= 3 << shift
 	// Set new bits.
 	*(*uint32)(f) |= uint32(b&3) << shift
