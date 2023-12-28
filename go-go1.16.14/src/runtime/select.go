@@ -18,8 +18,8 @@ const debugSelect = false
 // Changes here must also be made in src/cmd/internal/gc/select.go's scasetype.
 // 注释：select case中的case结构体
 type scase struct {
-	c    *hchan         // 注释：case的管道数据指针 // chan
-	elem unsafe.Pointer // 注释：数据指针，用来发送或接收数据的指针(管道发送时这个时发送的数据指针，管道接收时这个是存放管道数据的数据指针) // data element
+	c    *hchan         // 注释：case的管道数据指针，同时记录是发送还是接收数据 // chan
+	elem unsafe.Pointer // 注释：数据指针，用来发送或接收数据的指针(管道发送时这个是发送的数据指针，管道接收时这个是存放管道数据的数据指针) // data element
 }
 
 var (
@@ -28,6 +28,7 @@ var (
 )
 
 func selectsetpc(pc *uintptr) {
+	// 注释：返回调用该函数的函数的程序计数器的地址
 	*pc = getcallerpc()
 }
 
@@ -128,6 +129,7 @@ func block() {
 // a value was received.
 // 注释：此外，如果选择的scase是一个接收操作，它会报告是否接收到值。
 //
+// 注释：scase用于记录接受和发送通道的结构体
 // 注释：运行select case语句的时候会执行该函数
 // 注释：cas0 存放的是case管道数组首指针；
 // 注释：order0 存放的值是case管道数组的下标数组首指针。
@@ -141,7 +143,10 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 
 	// NOTE: In order to maintain a lean stack size, the number of scases
 	// is capped at 65536.
-	// 注释：为了保持精简堆栈大小，scase的数量上限为65536。
+	// 注释：为了保持精简堆栈大小，scase的数量上限为65536=2^16。
+	// 注释：unsafe.Pointer代表可以转换为任意类型的指针
+	// 注释：unsafe.Pointer(cas0)，将 cas0 转换为一个 unsafe.Pointer 类型
+	// 注释：(*[1 << 16]scase) ，上述得到的 unsafe.Pointer 转换为一个指向大小为65536的 scase 类型数组的指针
 	cas1 := (*[1 << 16]scase)(unsafe.Pointer(cas0))      // 注释：case是存放在数组里的，数组个数是1<<16个
 	order1 := (*[1 << 17]uint16)(unsafe.Pointer(order0)) // 注释：（大小是case的两倍）存放排序后的数组下标，前半部分是乱序的下标，后半部分是下标对应的锁
 
@@ -151,9 +156,8 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 	lockorder := order1[ncases:][:ncases:ncases] // 注释：(order1数组的下半部分)存储slice下标对应的锁数据
 	// NOTE: pollorder/lockorder's underlying array was not zero-initialized by compiler.
 
-	// Even when raceenabled is true, there might be select
-	// statements in packages compiled without -race (e.g.,
-	// ensureSigM in runtime/signal_unix.go).
+	// Even when raceenabled is true, there might be select statements in packages compiled without -race (e.g., ensureSigM in runtime/signal_unix.go).
+	// 译：即使raceenabled为true，在不使用race编译的包中也可能存在select语句（例如，运行时的ensureSigM/signal_unix.go）。
 	var pcs []uintptr
 	if raceenabled && pc0 != nil { // 注释：判读是否开启数据竞争
 		pc1 := (*[1 << 16]uintptr)(unsafe.Pointer(pc0))
@@ -171,20 +175,21 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 		t0 = cputicks()
 	}
 
-	// The compiler rewrites selects that statically have
-	// only 0 or 1 cases plus default into simpler constructs.
-	// The only way we can end up with such small sel.ncase
-	// values here is for a larger select in which most channels
-	// have been nilled out. The general code handles those
-	// cases correctly, and they are rare enough not to bother
-	// optimizing (and needing to test).
-
+	// The compiler rewrites selects that statically have only 0 or 1 cases plus default into simpler constructs.
+	// The only way we can end up with such small sel.ncase values here is for a larger select in which most channels have been nilled out.
+	// The general code handles those cases correctly,
+	// and they are rare enough not to bother optimizing (and needing to test).
+	// 译：编译器将静态仅具有 0 或 1 种情况加上默认值的选择重写为更简单的结构。
+	// 译：我们最终能得到如此小的 sel.ncase 值的唯一方法是进行更大的选择，其中大多数通道已被清空
+	// 译：通用代码正确处理这些情况，
+	// 译：而且它们非常罕见，无需费心优化（并且需要测试）。
 	// generate permuted order
 	norder := 0             // 注释：没有随机的case切片下标
 	for i := range scases { // 注释：遍历case切片数据，打乱case切片数据，实现case的随机执行
 		cas := &scases[i] // 注释：获取case的数据
 
 		// Omit cases without channels from the poll and lock orders.
+		// 译：忽略轮询和锁定命令中没有通道的情况。
 		if cas.c == nil { // 注释：跳过值为nil的管道
 			cas.elem = nil // allow GC
 			continue
@@ -235,7 +240,7 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 			// 注释：子节点和父节点比较，如果子节点大的话就和父节点交换数据，然后跳到子节点位置重新循环比较(这个顺序是从跟节点到子节点遍历)
 			if c.sortkey() < scases[lockorder[k]].c.sortkey() { // 注释：父节点和子节点比较
 				lockorder[j] = lockorder[k] // 注释：子节点赋值给父节点
-				j = k                       // 注释：(替换节点位置)从子节点开始向后遍历
+				j = k                       // 注释：(替换节点位置)从子节点开始向后遍历`
 				continue
 			}
 			break // 注释：如果父节点本身就是大值则退出循环
@@ -280,7 +285,7 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 		cas = &scases[casi] // 注释：case的元素，当前下标对应的case
 		c = cas.c           // 注释：chan管道
 
-		if casi >= nsends { // 注释：(处理管道读操作)大于发送总数，代表case是接收管道
+		if casi >= nsends { // 注释：(处理管道读操作)大于发送总数，代表case是接收管道(casi是随机下表)
 			sg = c.sendq.dequeue() // 注释：到写入阻塞队列中取出数据，（接收管道，首先是看发送阻塞管道里是否有数据，如果有数据优先取出来）
 			if sg != nil {         // 注释：如果发送阻塞队列中有数据，则跳到接收位置处理接收管道数据
 				goto recv // 注释：跳到处理接收管道数据的代码位置
@@ -348,11 +353,13 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 	}
 
 	// wait for someone to wake us up
+	// 译：等待唤醒
 	gp.param = nil
-	// Signal to anyone trying to shrink our stack that we're about
-	// to park on a channel. The window between when this G's status
-	// changes and when we set gp.activeStackChans is not safe for
-	// stack shrinking.
+	// Signal to anyone trying to shrink our stack that we're about to park on a channel.
+	// The window between when this G's status changes
+	// and when we set gp.activeStackChans is not safe for stack shrinking.
+	// 译：向任何试图缩小堆栈的人发出信号，表明我们即将停放在通道上。
+	// 译：该 G 的状态发生变化和我们设置 gp.activeStackChans 之间的窗口对于堆栈收缩来说是不安全的。
 	atomic.Store8(&gp.parkingOnChan, 1)
 	gopark(selparkcommit, nil, waitReasonSelect, traceEvGoBlockSelect, 1)
 	gp.activeStackChans = false

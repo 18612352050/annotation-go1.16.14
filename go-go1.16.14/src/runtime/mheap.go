@@ -390,7 +390,7 @@ type mSpanList struct {
 	last  *mspan // last span in list, or nil if none
 }
 
-// 注释：span是内存管理的基本单位,每个span用于管理特定的class对象, 跟据对象大小，span将一个或多个页拆分成多个块进行管理。
+// 注释：span是内存管理的基本单位,每个span用于管理特定的class对象, 根据对象大小，span将一个或多个页拆分成多个块进行管理。
 // 注释：span的结构体(双向链表结构)
 //
 //go:notinheap
@@ -399,7 +399,7 @@ type mspan struct {
 	prev *mspan     // 注释：列表中的前一个span，如果没有则为nil(用于将span链接起来) // previous span in list, or nil if none
 	list *mSpanList // For debugging. TODO: Remove.
 
-	startAddr uintptr // 注释：mpan管理内存的基地址(起始地址，也即所管理页的地址) // address of first byte of span aka s.base()
+	startAddr uintptr // 注释：mspan管理内存的基地址(起始地址，也即所管理页的地址) // address of first byte of span aka s.base()
 	npages    uintptr // 注释：管理的页数 // number of pages in span
 
 	manualFreeList gclinkptr // list of free objects in mSpanManual spans
@@ -421,7 +421,12 @@ type mspan struct {
 	// otherwise, object n is allocated. Bits starting at nelem are
 	// undefined and should never be referenced.
 	// 注释：allocBits是此跨度中对象的位图。如果n>=freeindex并且allocBits[n/8] & (1<<(n%8))为0，则对象n是空闲的；否则，n已经分配对象了。从nelem开始的位是未定义的，永远不应该被引用。
-	//
+	// 注：allocBits【位图】可以看成二位数组，每个一维包含8个元素（因为是二进制，是从右到左的），allocBits[n/8]取到第n行，1<<(n%8)取第n列，(n%8)=1，代表从右数第二列
+	//[
+	//[1,0,0,1,0,0,1,0],
+	//[0,0,1,0,0,0,0,0],
+	//[1,1,1,1,1,1,1,1]
+	//]
 	// Object n starts at address n*elemsize + (start << pageShift).
 	// 注释：对象n从地址 n*elemsize + (start << pageShift)。
 	freeindex uintptr // 注释：空闲对象块的下标位置（下标范围是[0 - nelems]之间(包含nelems)）空闲内存地址是 s.freeindex * s.elemsize + s.base()
@@ -443,7 +448,7 @@ type mspan struct {
 	// these.
 	// 注释：allocCache可能包含超出s.nelems的位；调用者必须忽略这些。
 	// 注释：allocCache是allocBits的补码(是8个一组，每组前后调换位置，第一组放在allocCache的低8位上面)，为了方便ctz
-	allocCache uint64 // 注释：(当前span的快速缓存)位图0已分配1空闲(默认1)(每一位控制一个span的1块，最大控制64块，每种sapn的块数量固定【objects】位置：/src/runtime/sizeclasses.go)。
+	allocCache uint64 // 注释：(当前span的快速缓存)位图0已分配1空闲(默认1)(每一位控制一个span的1块，最大控制64块，每种span的块数量固定【objects】位置：/src/runtime/sizeclasses.go)。
 
 	// allocBits and gcmarkBits hold pointers to a span's mark and
 	// allocation bits. The pointers are 8 byte aligned.
@@ -489,9 +494,9 @@ type mspan struct {
 	// h->sweepgen is incremented by 2 after every GC
 	// 注释：清理阶段
 	// 如果sweepgen == h->sweepgen - 2，【需要清理、未缓存】span(跨度)需要清扫标记。(注释：理解为重新清扫一下，因为每次清扫完成后会自动加2)
-	// 如果sweepgen == h->sweepgen - 1，【正在清理、未缓存】span(跨度)正在扫描标记。(注释：理解为重新清理过程中的状态，从新清理是-2,过程中会+1，所以状态为-1)
+	// 如果sweepgen == h->sweepgen - 1，【正在清理、未缓存】span(跨度)正在扫描标记。(注释：理解为重新清理过程中的状态，重新清理是-2,过程中会+1，所以状态为-1)
 	// 如果sweepgen == h->sweepgen，    【已经清理、未缓存】span(跨度)清扫标记完成，准备使用。
-	// 如果sweepgen == h->sweepgen + 1，【需要清理、已缓存】span(跨度)在扫描开始前在mcache缓存中，现在仍在mchche缓存中，需要扫描
+	// 如果sweepgen == h->sweepgen + 1，【需要清理、已缓存】span(跨度)在扫描开始前在mcache缓存中，现在仍在mcache缓存中，需要扫描
 	// 如果sweepgen == h->sweepgen + 3，【无需清理、已缓存】span(跨度)已经被扫描，并放到mcache缓存中
 	// h->sweepgen在每次垃圾回收后会增加2。
 

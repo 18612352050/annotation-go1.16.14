@@ -14,8 +14,11 @@ const (
 	_EINVAL = 22
 )
 
-// Don't split the stack as this method may be invoked without a valid G, which
-// prevents us from allocating more stack.
+// Don't split the stack as this method may be invoked without a valid G,
+//  which prevents us from allocating more stack.
+// 译：不要拆分堆栈，因为此方法可能在没有有效G的情况下被调用，
+// 译：这阻止了我们分配更多的堆栈。
+// 分配内容
 //go:nosplit
 func sysAlloc(n uintptr, sysStat *sysMemStat) unsafe.Pointer {
 	p, err := mmap(nil, n, _PROT_READ|_PROT_WRITE, _MAP_ANON|_MAP_PRIVATE, -1, 0)

@@ -1171,8 +1171,7 @@ func blockableSig(sig uint32) bool {
 	return flags&(_SigKill|_SigThrow) == 0
 }
 
-// gsignalStack saves the fields of the gsignal stack changed by
-// setGsignalStack.
+// gsignalStack saves the fields of the gsignal stack changed by setGsignalStack.
 type gsignalStack struct {
 	stack       stack
 	stackguard0 uintptr

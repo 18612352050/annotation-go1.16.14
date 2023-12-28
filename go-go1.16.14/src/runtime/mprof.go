@@ -337,6 +337,7 @@ func mProf_PostSweep() {
 }
 
 // Called by malloc to record a profiled block.
+// 译：由malloc调用以记录已配置文件的块
 func mProf_Malloc(p unsafe.Pointer, size uintptr) {
 	var stk [maxStack]uintptr
 	nstk := callers(4, stk[:])
@@ -374,6 +375,7 @@ func mProf_Free(b *bucket, size uintptr) {
 // 注释：0禁用（默认）1跟踪每个阻塞事件，不论事件的duration是多少。
 // 注释：>=2时是设置纳秒采样率。每一个duration>=rate的事件都能被追踪到。对于duration<rate的事件，分析器将会随机采样duration/ rate的事件。
 // 注释：例如:假设您的事件耗时100ns，rate值设为1000ns，那么事件就有10%的概率被分析器追踪。
+// 注释：用于控制阻塞事件的监视频率
 var blockprofilerate uint64 // in CPU ticks
 
 // SetBlockProfileRate controls the fraction of goroutine blocking events
@@ -634,9 +636,12 @@ type BlockProfileRecord struct {
 // If len(p) >= n, BlockProfile copies the profile into p and returns n, true.
 // If len(p) < n, BlockProfile does not change p and returns n, false.
 //
-// Most clients should use the runtime/pprof package or
-// the testing package's -test.blockprofile flag instead
-// of calling BlockProfile directly.
+// Most clients should use the runtime/pprof package or the testing package's -test.blockprofile flag instead of calling BlockProfile directly.
+// 译：返回n，当前阻塞配置文件中的记录
+// 译：If len(p) >= n：将配置文件复制到p中并返回n，true
+// 译：If len(p) < n,不更改p并返回n，false
+// 译：大多数客户端应该使用 runtime/prof包或测试包的-test.blockprofile标志，而不是直接调用BlockProfile
+
 func BlockProfile(p []BlockProfileRecord) (n int, ok bool) {
 	lock(&proflock)
 	for b := bbuckets; b != nil; b = b.allnext {

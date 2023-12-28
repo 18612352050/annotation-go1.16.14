@@ -53,10 +53,10 @@ type mcache struct {
 
 	stackcache [_NumStackOrders]stackfreelist
 
-	// flushGen indicates the sweepgen during which this mcache
-	// was last flushed. If flushGen != mheap_.sweepgen, the spans
-	// in this mcache are stale and need to the flushed so they
-	// can be swept. This is done in acquirep.
+	// flushGen indicates the sweepgen during which this mcache was last flushed.
+	// If flushGen != mheap_.sweepgen,
+	// the spans in this mcache are stale and need to the flushed so they can be swept.
+	// This is done in acquirep.
 	flushGen uint32
 }
 

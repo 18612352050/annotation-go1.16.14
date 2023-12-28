@@ -177,6 +177,9 @@ type ArbitraryType int
 //	hdr.Len = n
 //	s := *(*string)(unsafe.Pointer(&hdr)) // p possibly already lost
 //
+// 译：将指针和uintptr等转换成通过的指针类型，然后就可以通过操作转成指针还是unitptr
+// 如：uintPtr := uintptr(unsafe.Pointer(ptr))==>转成unitptr
+// 如：ptr := unsafe.Pointer(addr) newPtr := (*int)(unsafe.Pointer(uintPtr))==>转成指针
 type Pointer *ArbitraryType
 
 // Sizeof takes an expression x of any type and returns the size in bytes

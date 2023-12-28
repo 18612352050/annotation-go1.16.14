@@ -23,6 +23,8 @@ const (
 
 // Don't split the stack as this function may be invoked without a valid G,
 // which prevents us from allocating more stack.
+// 译：不要拆分堆栈，因为可能会在没有有效G的情况下调用此函数
+// 译：这使我们无法分配更多堆栈
 //go:nosplit
 func sysAlloc(n uintptr, sysStat *sysMemStat) unsafe.Pointer {
 	sysStat.add(int64(n))

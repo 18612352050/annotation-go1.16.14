@@ -2613,13 +2613,16 @@ func gcstopm() {
 }
 
 // Schedules gp to run on the current M.
-// If inheritTime is true, gp inherits the remaining time in the
-// current time slice. Otherwise, it starts a new time slice.
+// If inheritTime is true, gp inherits the remaining time in the current time slice.
+// Otherwise, it starts a new time slice.
 // Never returns.
 //
-// Write barriers are allowed because this is called immediately after
-// acquiring a P in several places.
-//
+// Write barriers are allowed because this is called immediately after acquiring a P in several places.
+// 译：安排 gp 在当前 M 上运行。
+// 译：如果inheritTime为true，则gp继承当前时间片的剩余时间。
+// 译：否则，它开始一个新的时间片。
+// 译：永不返回。
+// 译：允许写屏障，因为在多个地方获取 P 后立即调用此函数。
 //go:yeswritebarrierrec
 func execute(gp *g, inheritTime bool) {
 	_g_ := getg()

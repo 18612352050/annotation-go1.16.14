@@ -15,37 +15,34 @@ import (
 const (
 	// G status
 	//
-	// Beyond indicating the general state of a G, the G status
-	// acts like a lock on the goroutine's stack (and hence its
-	// ability to execute user code).
-	//
-	// If you add to this list, add to the list
-	// of "okay during garbage collection" status
-	// in mgcmark.go too.
-	//
+	// Beyond indicating the general state of a G, the G status acts like a lock on the goroutine's stack (and hence its ability to execute user code).
+	// 译：除了指示G的一般状态外，G状态就像goroutine堆栈上的锁（因此它能够执行用户代码）。
+	// If you add to this list, add to the list of "okay during garbage collection" status in mgcmark.go too.
+	// 译：如果您添加到该列表中，也可以添加到mgcmark.go中“垃圾收集期间正常”状态的列表中
 	// TODO(austin): The _Gscan bit could be much lighter-weight.
-	// For example, we could choose not to run _Gscanrunnable
-	// goroutines found in the run queue, rather than CAS-looping
-	// until they become _Grunnable. And transitions like
-	// _Gscanwaiting -> _Gscanrunnable are actually okay because
-	// they don't affect stack ownership.
+	// For example, we could choose not to run _Gscanrunnable goroutines found in the run queue,
+	// 译：例如，我们可以在运行队列中选择不运行的_Gscanrunnable goroutines
+	// rather than CAS-looping ntil they become _Grunnable.
+	// 译：而不是CAS-looping，直到它们变为_Grunnable
+	// And transitions like _Gscanwaiting -> _Gscanrunnable are actually okay because they don't affect stack ownership.
+	// 译：像_Gscanwaiting->_Gscanrunnable这样的转换实际上是可以的，因为它们不会影响堆栈所有权
+	// _Gidle means this goroutine was just allocated and has not yet been initialized.
+	// _Gidle的意思是这个goroutine刚刚分配，还没有初始化
 
-	// _Gidle means this goroutine was just allocated and has not
-	// yet been initialized.
 	_Gidle = iota // 0 // 注释：_Gidle=0 刚刚被分配并且还没有被初始化
 
 	// _Grunnable means this goroutine is on a run queue. It is
 	// not currently executing user code. The stack is not owned.
 	_Grunnable // 1 // 注释：_Grunnable=1 没有执行代码，没有栈的所有权，存储在运行队列中
 
-	// _Grunning means this goroutine may execute user code. The
-	// stack is owned by this goroutine. It is not on a run queue.
+	// _Grunning means this goroutine may execute user code.
+	// The stack is owned by this goroutine. It is not on a run queue.
 	// It is assigned an M and a P (g.m and g.m.p are valid).
-	_Grunning // 2 // 注释：_Grunning=2 可以执行代码，拥有栈的所有权，被赋予了内核线程 M 和处理器 P
+	_Grunning // 2 // 注释：_Grunning=2 可以执行代码，拥有栈的所有权，被赋予了内核线程 M 和处理器 P,不在运行队列上
 
 	// _Gsyscall means this goroutine is executing a system call.
-	// It is not executing user code. The stack is owned by this
-	// goroutine. It is not on a run queue. It is assigned an M.
+	// It is not executing user code. The stack is owned by this goroutine.
+	// It is not on a run queue. It is assigned an M.
 	_Gsyscall // 3 // 注释：_Gsyscall=3 正在执行系统调用，没有执行用户代码，拥有栈的所有权，被赋予了内核线程 M 但是不在运行队列上
 
 	// _Gwaiting means this goroutine is blocked in the runtime.
@@ -73,29 +70,23 @@ const (
 	// _Genqueue_unused is currently unused.
 	_Genqueue_unused // 7 // 注释：_Genqueue_unused=7 目前未使用，不用理会
 
-	// _Gcopystack means this goroutine's stack is being moved. It
-	// is not executing user code and is not on a run queue. The
-	// stack is owned by the goroutine that put it in _Gcopystack.
+	// _Gcopystack means this goroutine's stack is being moved.
+	// It is not executing user code and is not on a run queue.
+	// The stack is owned by the goroutine that put it in _Gcopystack.
 	_Gcopystack // 8 // 注释：_Gcopystack=8 栈正在被拷贝，没有执行代码，不在运行队列上
 
-	// _Gpreempted means this goroutine stopped itself for a
-	// suspendG preemption. It is like _Gwaiting, but nothing is
-	// yet responsible for ready()ing it. Some suspendG must CAS
-	// the status to _Gwaiting to take responsibility for
-	// ready()ing this G.
+	// _Gpreempted means this goroutine stopped itself for a suspendG preemption.
+	// It is like _Gwaiting, but nothing is yet responsible for ready()ing it.
+	// Some suspendG must CAS the status to _Gwaiting to take responsibility for ready()ing this G.
 	_Gpreempted // 9 // 注释：_Gpreempted=9 由于抢占而被阻塞，没有执行用户代码并且不在运行队列上，等待唤醒
 
-	// _Gscan combined with one of the above states other than
-	// _Grunning indicates that GC is scanning the stack. The
-	// goroutine is not executing user code and the stack is owned
-	// by the goroutine that set the _Gscan bit.
+	// _Gscan combined with one of the above states other than _Grunning indicates that GC is scanning the stack.
+	// The goroutine is not executing user code and the stack is owned by the goroutine that set the _Gscan bit.
 	//
-	// _Gscanrunning is different: it is used to briefly block
-	// state transitions while GC signals the G to scan its own
-	// stack. This is otherwise like _Grunning.
+	// _Gscanrunning is different: it is used to briefly block state transitions while GC signals the G to scan its own stack.
+	// This is otherwise like _Grunning.
 	//
-	// atomicstatus&~Gscan gives the state the goroutine will
-	// return to when the scan completes.
+	// atomicstatus&~Gscan gives the state the goroutine will return to when the scan completes.
 	_Gscan          = 0x1000               // 注释：_Gscan=10 GC 正在扫描栈空间，没有执行代码，可以与其他状态同时存在
 	_Gscanrunnable  = _Gscan + _Grunnable  // 0x1001
 	_Gscanrunning   = _Gscan + _Grunning   // 0x1002 // 注释：GC扫描中+G运行中
@@ -323,16 +314,23 @@ func setMNoWB(mp **m, new *m) {
 type gobuf struct {
 	// The offsets of sp, pc, and g are known to (hard-coded in) libmach.
 	// 注释：寄存器 sp, pc 和 g 的偏移量，硬编码在 libmach
-	// ctxt is unusual with respect to GC: it may be a
-	// heap-allocated funcval, so GC needs to track it, but it
-	// needs to be set and cleared from assembly, where it's
-	// difficult to have write barriers. However, ctxt is really a
-	// saved, live register, and we only ever exchange it between
-	// the real register and the gobuf. Hence, we treat it as a
-	// root during stack scanning, which means assembly that saves
-	// and restores it doesn't need write barriers. It's still
-	// typed as a pointer so that any other writes from Go get
-	// write barriers.
+	// ctxt is unusual with respect to GC: it may be a heap-allocated funcval,
+	// 译：ctxt对于GC来说是不寻常的：它可能是一个堆分配的函数
+	// so GC needs to track it, but it needs to be set and cleared from assembly,
+	// 译：所以GC需要跟踪它，但它需要设置并从程序集中清除，
+	// where it's difficult to have write barriers.
+	// 译：在那里很难有写障碍。
+	// However, ctxt is really a saved, live register,
+	// 译：然而，ctxt实际上是一个保存的实时寄存器
+	// and we only ever exchange it between the real register and the gobuf.
+	// 译：并且我们只在真实寄存器和gobuf之间交换它。
+	// Hence, we treat it as a root during stack scanning,
+	// 译：因此，我们在堆栈扫描期间将其视为根，
+	// which means assembly that saves and restores it doesn't need write barriers.
+	// 译：这意味着保存和恢复程序集不需要写障碍。
+	// It's still typed as a pointer so that any other writes from Go get write barriers.
+	// 译：它仍然被键入为指针，因此Go中的任何其他写入都会遇到写入障碍。
+
 	// 注释：调度器在将G由一种状态变更为另一种状态时，需要将上下文信息保存到这个gobuf结构体，当再次运行G的时候，再从这个结构体中读取出来，它主要用来暂存上下文信息。
 	// 注释：其中的栈指针 sp 和程序计数器 pc 会用来存储或者恢复寄存器中的值，设置即将执行的代码
 	sp   uintptr        // 注释：sp栈指针位置(保存CPU的rsp寄存器的值)
@@ -360,9 +358,9 @@ type gobuf struct {
 //
 // 注释：等待(阻塞)的G（通常是全局G链表或当前P中等待的G列表中的成员），所有要执行的G都是以这个结构体的形式存在
 type sudog struct {
-	// The following fields are protected by the hchan.lock of the
-	// channel this sudog is blocking on. shrinkstack depends on
-	// this for sudogs involved in channel ops.
+	// The following fields are protected by the hchan.
+	// lock of the channel this sudog is blocking on.
+	// shrinkstack depends on this for sudogs involved in channel ops.
 
 	g *g // 注释：需要休眠的G
 
@@ -375,7 +373,7 @@ type sudog struct {
 	// For semaphores, all fields (including the ones above)
 	// are only accessed when holding a semaRoot lock.
 
-	acquiretime int64 // 注释：初始胡的时间
+	acquiretime int64 // 注释：初始化的时间
 	releasetime int64 // 注释：释放时的时间,-1代表send是再设置时间，如果大于0，会把cputicks()设置进来（CPU时钟周期计数器）。启动阻塞事件，blockevent阻塞监听的时间是当前值减去当时cputicks()值
 	ticket      uint32
 
@@ -433,12 +431,12 @@ type g struct {
 	// It is ~0 on other goroutine stacks, to trigger a call to morestackc (and crash).
 	stack stack // offset known to runtime/cgo // 注释：当前栈（G所在的栈）的边界(对应的开始和结束地址)（占用空间时16字节）
 	// 注释：在g结构体中的stackguard0 字段是出现爆栈前的警戒线，通常值是stack.lo+StackGuard也可以存StackPreempt触发抢占。
-	// 注释：stackguard0 的偏移量是16个字节，与当前的真实SP(stack pointer)和爆栈警戒线（stack.lo+StackGuard）比较，如果超出警戒线则表示需要进行栈扩容。
+	// 注释：stackguard0 的偏移量是16个字节（stack占用16个字节），与当前的真实SP(stack pointer)和爆栈警戒线（stack.lo+StackGuard）比较，如果超出警戒线则表示需要进行栈扩容。
 	// 注释：先调用runtime·morestack_noctxt()进行栈扩容，然后又跳回到函数的开始位置，此时函数的栈已经调整了。
 	// 注释：然后再进行一次栈大小的检测，如果依然不足则继续扩容，直到栈足够大为止。
 	// 注释：下面两个成员用于栈溢出检查，实现栈的自动伸缩，抢占调度也会用到stackguard0
 	// 注释：打印对应的汇编会看到：CMPQ	SP, 16(CX) 如果小于0则执行 JLS L_MORE_STK 跳转位置执行CALL runtime.morestack_noctxt(SB)进行栈扩容，扩容后跳回L_BEGIN位置重新执行栈空间检查
-	// 注释：如果栈空间大小依然不够则再重复扩容一次，知道栈大小够用为止
+	// 注释：如果栈空间大小依然不够则再重复扩容一次，直到栈大小够用为止
 	stackguard0 uintptr // 注释：爆栈前警戒线（所在位置是G偏移16字节）。Go代码检查栈空间低于这个值会扩张。被设置成StackPreempt意味着当前g发出了抢占请求 // offset known to liblink
 	stackguard1 uintptr // 注释：（C代码的爆栈警戒线）C代码检查栈空间低于这个值会扩张。 // offset known to liblink
 
@@ -637,15 +635,10 @@ type p struct {
 	runqhead uint32        // 注释：本地g队列(数组)runq的头下标
 	runqtail uint32        // 注释：本地g队列(数组)runq的尾下标(如果队列装满(runqtail-runqhead)==len(runq)时会把本地队列的G的一半放到全局队列中)
 	runq     [256]guintptr // 注释：本地g的指针队列，使用数组实现的循环队列
-	// runnext, if non-nil, is a runnable G that was ready'd by
-	// the current G and should be run next instead of what's in
-	// runq if there's time remaining in the running G's time
-	// slice. It will inherit the time left in the current time
-	// slice. If a set of goroutines is locked in a
-	// communicate-and-wait pattern, this schedules that set as a
-	// unit and eliminates the (potentially large) scheduling
-	// latency that otherwise arises from adding the ready'd
-	// goroutines to the end of the run queue.
+	// runnext, if non-nil, is a runnable G that was ready'd by the current G and should be run next instead of what's in runq if there's time remaining in the running G's time slice.
+	// It will inherit the time left in the current time slice.
+	// If a set of goroutines is locked in a communicate-and-wait pattern,
+	// this schedules that set as a unit and eliminates the (potentially large) scheduling latency that otherwise arises from adding the ready'd goroutines to the end of the run queue.
 	runnext guintptr // 注释：g队列里的下一个指针，下一个运行的g，优先级最高
 
 	// Available G's (status == Gdead)
@@ -661,12 +654,14 @@ type p struct {
 	sudogbuf   [128]*sudog
 
 	// Cache of mspan objects from the heap.
+	// 译：从堆中缓存mspan对象。
 	mspancache struct {
-		// We need an explicit length here because this field is used
-		// in allocation codepaths where write barriers are not allowed,
-		// and eliminating the write barrier/keeping it eliminated from
-		// slice updates is tricky, moreso than just managing the length
-		// ourselves.
+		// We need an explicit length here because this field is used in allocation codepaths where write barriers are not allowed,
+		// and eliminating the write barrier/keeping it eliminated from slice updates is tricky,
+		// moreso than just managing the length ourselves.
+		// 译：我们在这里需要一个明确的长度，因为该字段用于不允许写入屏障的分配代码路径，
+		// 译：并且消除写障碍/保持从切片更新中消除写障碍是棘手的，
+		// 译：不仅仅是自己管理长度。
 		len int
 		buf [128]*mspan
 	}
@@ -674,11 +669,11 @@ type p struct {
 	tracebuf traceBufPtr // 注释：存放栈追踪的栈缓冲区地址
 
 	// traceSweep indicates the sweep events should be traced.
-	// This is used to defer the sweep start event until a span
-	// has actually been swept.
+	// This is used to defer the sweep start event until a span has actually been swept.
+	// 译：traceSweep表示应该跟踪扫描事件。
+	// 译：这用于推迟扫描开始事件，直到实际扫描了一个跨度。
 	traceSweep bool // 注释：
-	// traceSwept and traceReclaimed track the number of bytes
-	// swept and reclaimed by sweeping in the current sweep loop.
+	// traceSwept and traceReclaimed track the number of bytes swept and reclaimed by sweeping in the current sweep loop.
 	traceSwept, traceReclaimed uintptr
 
 	palloc persistentAlloc // per-P to avoid mutex
@@ -688,6 +683,9 @@ type p struct {
 	// The when field of the first entry on the timer heap.
 	// This is updated using atomic functions.
 	// This is 0 if the timer heap is empty.
+	// 译：计时器堆上第一个条目的when字段。
+	// 译：这是使用原子函数更新的。
+	// 译：如果计时器堆为空，则此值为0。
 	timer0When uint64
 
 	// The earliest known nextwhen field of a timer with
@@ -702,22 +700,28 @@ type p struct {
 	gcFractionalMarkTime int64 // Nanoseconds in fractional mark worker (atomic)
 
 	// gcMarkWorkerMode is the mode for the next mark worker to run in.
-	// That is, this is used to communicate with the worker goroutine
-	// selected for immediate execution by
-	// gcController.findRunnableGCWorker. When scheduling other goroutines,
+	// That is, this is used to communicate with the worker goroutine elected for immediate execution by gcController.findRunnableGCWorker.
+	// When scheduling other goroutines,
 	// this field must be set to gcMarkWorkerNotWorker.
+	// 译：gcMarkWorkerMode是下一个要运行的标记工作程序的模式。
+	// 译：也就是说，它用于与gcController.findRunnableGCWorker选择立即执行的worker goroutine进行通信。
+	// 译：当调度其他goroutine时，
+	// 译：此字段必须设置为gcMarkWorkerNotWorker。
 	gcMarkWorkerMode gcMarkWorkerMode
-	// gcMarkWorkerStartTime is the nanotime() at which the most recent
-	// mark worker started.
+	// gcMarkWorkerStartTime is the nanotime() at which the most recent mark worker started.
+	// 译：gcMarkWorkerStartTime是最近的标记工作程序启动的nanotime（）。
 	gcMarkWorkerStartTime int64
 
-	// gcw is this P's GC work buffer cache. The work buffer is
-	// filled by write barriers, drained by mutator assists, and
-	// disposed on certain GC state transitions.
+	// gcw is this P's GC work buffer cache.
+	// The work buffer is filled by write barriers, drained by mutator assists,
+	// and disposed on certain GC state transitions.
+	// 译：gcw是这个P的GC工作缓冲区缓存。
+	// 译：工作缓冲区由写入屏障填充、由变异器辅助耗尽，
+	// 译：并且被布置在某些GC状态转换上。
 	gcw gcWork
 
 	// wbBuf is this P's GC write barrier buffer.
-	//
+	// 译：wbBuf是找个p的GC写屏障缓冲区
 	// TODO: Consider caching this in the running G.
 	wbBuf wbBuf
 
@@ -962,27 +966,29 @@ type _defer struct {
 	siz     int32 // 注释：存放参数和返回值的内存大小 // includes both arguments and results
 	started bool
 	heap    bool // 注释：是否存储在堆上,true代表在堆上，false代表在栈上
-	// openDefer indicates that this _defer is for a frame with open-coded
-	// defers. We have only one defer record for the entire frame (which may
-	// currently have 0, 1, or more defers active).
+	// openDefer indicates that this _defer is for a frame with open-coded defers.
+	// We have only one defer record for the entire frame (which may currently have 0, 1, or more defers active).
 	// 注释：open defer优化条件，当前函数小于等于8个defer，或者return个数 * defer个数 < 15个，才被优化到函数尾部，有点像函数内联
 	openDefer bool     // 注释：表示当前 defer 是否经过开放编码的优化(优化大题意思和函数内联很相似，就是把defer放到当前函数末尾位置，然后用一个8位的二进制标记运行时是否需要执行defer)
 	sp        uintptr  // 注释：sp寄存器的值，栈指针 // sp at time of defer
-	pc        uintptr  // 注释：pc寄存器的值，调用方的程序计数器 // pc at time of defer
+	pc        uintptr  // 注释：pc寄存器的值，调用方的程序计数器 ，用于存储将要执行的下一条指令的地址// pc at time of defer
 	fn        *funcval // 注释：传入的函数，就是defer要执行的函数地址 // can be nil for open-coded defers
 	_panic    *_panic  // 注释：是触发延迟调用的结构体，可能为空 // panic that is running defer
-	link      *_defer  // 注释：defer的链表地址
+	link      *_defer  // 注释：defer的链表地址,单向链表
 
-	// If openDefer is true, the fields below record values about the stack
-	// frame and associated function that has the open-coded defer(s). sp
-	// above will be the sp for the frame, and pc will be address of the
-	// deferreturn call in the function.
+	// If openDefer is true,
+	// the fields below record values about the stack frame and associated function that has the open-coded defer(s).
+	// sp above will be the sp for the frame,
+	// and pc will be address of the deferreturn call in the function.
+	// 译：如果openDefer为真，
+	// 译：下面的字段记录有关堆栈帧和具有开放编码defer的相关函数的值。
+	// 译：上面的sp将是该帧的sp，
+	// 译：pc将是函数中deferereturn调用的地址。
 	fd   unsafe.Pointer // funcdata for the function associated with the frame
 	varp uintptr        // value of varp for the stack frame
-	// framepc is the current pc associated with the stack frame. Together,
-	// with sp above (which is the sp associated with the stack frame),
-	// framepc/sp can be used as pc/sp pair to continue a stack trace via
-	// gentraceback().
+	// framepc is the current pc associated with the stack frame.
+	// Together, with sp above (which is the sp associated with the stack frame),
+	// framepc/sp can be used as pc/sp pair to continue a stack trace via gentraceback().
 	// 注释：framepc是与堆栈帧关联的当前pc。再加上上面的sp（与堆栈帧关联的sp），framepc/sp可以用作pc/sp对，通过gentraceback（）继续堆栈跟踪。
 	framepc uintptr // 注释：
 }
@@ -991,22 +997,22 @@ type _defer struct {
 // 注释：_panic保存活动的panic信息
 // A _panic value must only ever live on the stack.
 // 注释：_panic的值只保存在栈中
-// The argp and link fields are stack pointers, but don't need special
-// handling during stack growth: because they are pointer-typed and
-// _panic values only live on the stack, regular stack pointer
-// adjustment takes care of them.
+// The argp and link fields are stack pointers,
+// but don't need special handling during stack growth:
+// because they are pointer-typed and _panic values only live on the stack,
+// regular stack pointer djustment takes care of them.
 // 注释：panic的结构体（panic是记录在G里的）
-// 注释：字段argp很有意思代表：发生panic的时候回触发refer函数，在为调refer函数准备的参数栈地址（调用下一个函数的参数和返回值，又上一个函数栈准备，这里就是这个站准备的参数的站地址）
+// 注释：字段argp很有意思代表：发生panic的时候会触发refer函数，在为调refer函数准备的参数栈地址（调用下一个函数的参数和返回值，又上一个函数栈准备，这里就是这个栈准备的参数的栈地址）
 // 注释：当recover的时候会接受到入参argp，然后和存储的panic.argp进行比较，如果比较不通过的时候无法获取recover的数据
 type _panic struct {
 	argp      unsafe.Pointer // 注释：指向defer调用时参数的指针(调用refer前的的参数指针，给refer准备的参数对应的指针) // pointer to arguments of deferred call run during panic; cannot move - known to liblink
 	arg       interface{}    // 注释：panic的参数，打印panic的内容 // argument to panic
-	link      *_panic        // 注释：panic的单向链表  // link to earlier panic
+	link      *_panic        // 注释：panic的单向链表（存储上一个panic，从而形成所有panic的单项链表）  // link to earlier panic
 	pc        uintptr        // 注释：recover的时候,如果绕过painc的时候需要继续之前的pc位置执行 // where to return to in runtime if this panic is bypassed
 	sp        unsafe.Pointer // 注释：recover的时候,如果绕过painc的时候需要继续之前的sp栈位置 // where to return to in runtime if this panic is bypassed
 	recovered bool           // 注释：当前是否被recover恢复 // whether this panic is over
 	aborted   bool           // 注释：当前是否被强行终止(当defer里发生panin的时候会把上一个panic.aborted设置成true) // the panic was aborted
-	goexit    bool           // 注释：是否是推出函数发生的panic
+	goexit    bool           // 注释：是否是推出函数发生的panic（runtime.Goexit()）
 }
 
 // stack traces

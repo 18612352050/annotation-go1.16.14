@@ -55,36 +55,45 @@ func init() {
 type gcWork struct {
 	// wbuf1 and wbuf2 are the primary and secondary work buffers.
 	//
-	// This can be thought of as a stack of both work buffers'
-	// pointers concatenated. When we pop the last pointer, we
-	// shift the stack up by one work buffer by bringing in a new
-	// full buffer and discarding an empty one. When we fill both
-	// buffers, we shift the stack down by one work buffer by
-	// bringing in a new empty buffer and discarding a full one.
-	// This way we have one buffer's worth of hysteresis, which
-	// amortizes the cost of getting or putting a work buffer over
-	// at least one buffer of work and reduces contention on the
-	// global work lists.
+	// This can be thought of as a stack of both work buffers' pointers concatenated.
+	// When we pop the last pointer,
+	// we shift the stack up by one work buffer by bringing in a new full buffer and discarding an empty one.
+	// When we fill both buffers,
+	// we shift the stack down by one work buffer by  bringing in a new empty buffer and discarding a full one.
+	// This way we have one buffer's worth of hysteresis,
+	// which amortizes the cost of getting or putting a work buffer over at least one buffer of work and reduces contention on the global work lists.
 	//
-	// wbuf1 is always the buffer we're currently pushing to and
-	// popping from and wbuf2 is the buffer that will be discarded
-	// next.
+	// wbuf1 is always the buffer we're currently pushing to and popping from and wbuf2 is the buffer that will be discarded  next.
 	//
 	// Invariant: Both wbuf1 and wbuf2 are nil or neither are.
+	//译：wbuf1和wbuf2是主要和次要工作缓冲区。
+	//译：这可以被认为是两个工作缓冲区的指针连接在一起的堆栈。
+	//译：当我们弹出最后一个指针时，
+	//译：我们通过引入一个新的满缓冲区并丢弃一个空缓冲区，将堆栈上移一个工作缓冲区。
+	//译：当我们填充两个缓冲区时，
+	//译：我们通过引入一个新的空缓冲区并丢弃一个满的缓冲区，将堆栈下移一个工作缓冲区。
+	//译：这样我们就有了相当于一个缓冲器的滞后，
+	//译：这将获得或放置工作缓冲区的成本分摊到至少一个工作缓冲区上，并减少全局工作列表上的争用。
+	//译：wbuf1始终是我们当前推送和弹出的缓冲区，wbuf2是下一个将被丢弃的缓冲区。
+	//译：不变：wbuf1和wbuf2都为零或都不为零。
 	wbuf1, wbuf2 *workbuf
 
-	// Bytes marked (blackened) on this gcWork. This is aggregated
-	// into work.bytesMarked by dispose.
+	// Bytes marked (blackened) on this gcWork.
+	// This is aggregated into work.bytesMarked by dispose.
+	// 译：此gcWork上标记（变黑）的字节。
+	// 译：这将聚合到工作中。bytesMarked by dispose。
 	bytesMarked uint64
 
-	// Scan work performed on this gcWork. This is aggregated into
-	// gcController by dispose and may also be flushed by callers.
+	// Scan work performed on this gcWork.
+	// This is aggregated into gcController by dispose and may also be flushed by callers.
+	// 译：扫描在此gcWork上执行的工作。
+	// 译：这通过dispose方法聚合到gcController中，也可以由调用方刷新。
 	scanWork int64
 
-	// flushedWork indicates that a non-empty work buffer was
-	// flushed to the global work list since the last gcMarkDone
-	// termination check. Specifically, this indicates that this
-	// gcWork may have communicated work to another gcWork.
+	// flushedWork indicates that a non-empty work buffer was flushed to the global work list since the last gcMarkDone termination check.
+	// Specifically, this indicates that this  gcWork may have communicated work to another gcWork.
+	// 译：flushdWork表示自上次gcMarkDone终止检查以来，已将非空工作缓冲区刷新到全局工作列表中。
+	// 译：具体来说，这表明这个gcWork可能已经将工作传达给了另一个gcWork。
 	flushedWork bool
 }
 
