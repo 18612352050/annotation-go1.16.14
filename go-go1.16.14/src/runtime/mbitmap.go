@@ -131,10 +131,11 @@ var _ = heapBits{arena: (1<<heapAddrBits)/heapArenaBytes - 1}
 // the address of the object in the heap.
 // We maintain one set of mark bits for allocation and one for
 // marking purposes.
+// 注释：span对应对象的位图（GC 使用）
 type markBits struct {
-	bytep *uint8
-	mask  uint8
-	index uintptr
+	bytep *uint8  // 注释：位图，第几组的地址（地址对应的是一个uint8的位图）
+	mask  uint8   // 注释：位图1标记0未标记，组里(uint8的组)的第几位(上面控制组)，标记后可以执行清理操作
+	index uintptr // 注释：span中的第几个对象
 }
 
 //go:nosplit
@@ -173,6 +174,7 @@ func (s *mspan) refillAllocCache(whichByte uintptr) {
 // faster if profiling warrants it.
 // 注释：nextFreeIndex返回s中s.freeindex处或之后的下一个可用对象的索引。如果配置文件允许，可以使用一些硬件指令加快此操作。
 //
+// 注释：尝试从mcache下smspan.allocBits中拿出64个放到快速缓存mspan.allocCache中并且踢出一个空块，返回空块位置下标
 // 注释：返回空闲对象块下标，并把空闲下标块指针向后移动一位(因为本次拿出来认为已经被使用),如果快速缓存区已经用完了，会继续向后缓存64个块到快速缓存区里
 // 注释：函数执行动作(当前函数只是在一个span中获取空块，优先去快速缓存找，如果没有找到则去allocBits中拿出一批放到快速缓存里继续找)
 //		1.获取span的数据（包括：下一个空块下标、已分配的个数、span分配位图）
@@ -264,9 +266,10 @@ func markBitsForAddr(p uintptr) markBits {
 	return s.markBitsForIndex(objIndex)
 }
 
+// 注释：标记位图，8个一组，返回结构，包含第几组的地址，当前组的第几位来控制对象分配情况，和第几个对象
 func (s *mspan) markBitsForIndex(objIndex uintptr) markBits {
-	bytep, mask := s.gcmarkBits.bitp(objIndex)
-	return markBits{bytep, mask, objIndex}
+	bytep, mask := s.gcmarkBits.bitp(objIndex) // 注释：bytep是所属组的指针；mask是8位里span所属的位置
+	return markBits{bytep, mask, objIndex}     // 注释：组装数据
 }
 
 func (s *mspan) markBitsForBase() markBits {
@@ -274,8 +277,9 @@ func (s *mspan) markBitsForBase() markBits {
 }
 
 // isMarked reports whether mark bit m is set.
+// 注释：返回是否被标记，1标记0未标记
 func (m markBits) isMarked() bool {
-	return *m.bytep&m.mask != 0
+	return *m.bytep&m.mask != 0 // 注释：*m.bytep为组地址对应的uint8数据（8位），m.mask是span对应的标记位
 }
 
 // setMarked sets the marked bit in the markbits, atomically.
@@ -287,6 +291,8 @@ func (m markBits) setMarked() {
 }
 
 // setMarkedNonAtomic sets the marked bit in the markbits, non-atomically.
+// 注释：译：setMarkedNonAtomic以非原子方式设置标记位中的标记位。
+// 注释：非原子操作，设置标记位
 func (m markBits) setMarkedNonAtomic() {
 	*m.bytep |= m.mask
 }

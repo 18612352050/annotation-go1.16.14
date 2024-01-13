@@ -32,7 +32,7 @@ const (
 	traceEvGCDone            = 8  // GC done [timestamp]
 	traceEvGCSTWStart        = 9  // GC STW start [timestamp, kind]
 	traceEvGCSTWDone         = 10 // GC STW done [timestamp]
-	traceEvGCSweepStart      = 11 // GC sweep start [timestamp, stack id]
+	traceEvGCSweepStart      = 11 // 注释：GC清理阶段注册链路追踪的开始 // GC sweep start [timestamp, stack id]
 	traceEvGCSweepDone       = 12 // GC sweep done [timestamp, swept, reclaimed]
 	traceEvGoCreate          = 13 // goroutine creation [timestamp, new goroutine id, new stack id, stack id]
 	traceEvGoStart           = 14 // goroutine starts running [timestamp, goroutine id, seq]
@@ -519,26 +519,26 @@ func traceFullDequeue() traceBufPtr {
 // to collect and remember it for this particular call.
 // 注释：如果skip=0，则此事件类型应该包含一个堆栈，但我们不希望为该特定调用收集并记住它。
 //
-// 注释：栈追踪事件
+// 注释：注册链路追踪时间，ev是链路追踪的动作标识
 func traceEvent(ev byte, skip int, args ...uint64) {
 	mp, pid, bufp := traceAcquireBuffer() // 注释：获取当前G的M；M对应P的ID；全局栈追踪的缓冲区地址的指针(对象)
 	// Double-check trace.enabled now that we've done m.locks++ and acquired bufLock.
-	// 注释：仔细检查trace.enabled，因为我们已经完成了m.locks++并获得了bufLock。
 	// This protects from races between traceEvent and StartTrace/StopTrace.
-	// 注释：这可以防止traceEvent和StartTrace/StopTrace之间的竞争。
-
+	// 注释：译：既然我们已经完成了m.locks++并获得了bufLock，请仔细检查trace.enabled。这可以防止traceEvent和StartTrace/StopTrace之间的竞争。
+	//
 	// The caller checked that trace.enabled == true, but trace.enabled might have been
 	// turned off between the check and now. Check again. traceLockBuffer did mp.locks++,
-	// 注释：调用方检查trace.enabled==true，但trace.enabed可能在检查到现在之间已关闭。再次检查。traceLockBuffer执行了mp。locks++，
 	// StopTrace does stopTheWorld, and stopTheWorld waits for mp.locks to go back to zero,
-	// 注释：StopTrace会停止TheWorld，而stopTheWorld会等待mp.locks归零，
 	// so if we see trace.enabled == true now, we know it's true for the rest of the function.
-	// 注释：因此，如果我们现在看到trace.enabled==true，我们就知道它对函数的其余部分是true。
 	// Exitsyscall can run even during stopTheWorld. The race with StartTrace/StopTrace
 	// during tracing in exitsyscall is resolved by locking trace.bufLock in traceLockBuffer.
-	// 注释：Exitsyscall甚至可以在stopTheWorld期间运行。exitsyscall中跟踪期间StartTrace/StopTrace的争用通过在traceLockBuffer中锁定trace.bufLock来解决。
+	// 注释：译：调用方检查trace.enabled==true，但trace.enabed可能在检查期间和现在之间已关闭。再次检查。
+	//		traceLockBuffer做了mp.locks++，StopTrace做了stopTheWorld，stopTheWorld等待mp.locks归零，
+	//		所以如果我们现在看到trace.enabled==true，我们就知道函数的其余部分也是如此。Exitsyscall甚至可以在stopTheWorld期间运行。
+	//		在exitsyscall中跟踪期间与StartTrace/StopTrace的竞争通过在traceLockBuffer中锁定trace.bufLock来解决。
 	//
-	// Note trace_userTaskCreate runs the same check. // 注释：请注意trace_userTaskCreate运行相同的检查。
+	// Note trace_userTaskCreate runs the same check.
+	// 注释：译：请注意trace_userTaskCreate运行相同的检查。
 	if !trace.enabled && !mp.startingtrace { // 注释：如果栈追踪已经关闭，并且没有开始执行栈追踪则释放并返回
 		traceReleaseBuffer(pid)
 		return
@@ -1052,13 +1052,19 @@ func traceGCSweepStart() {
 //
 // This may be called outside a traceGCSweepStart/traceGCSweepDone
 // pair; however, it will not emit any trace events in this case.
+// 注释：链路追踪时清理Span，bytesSwept是需要清理的字节
+// 注释：步骤
+// 		1.判断是否需要清理时执行链路追踪
+// 		2.链路追踪的字节是否是0（是否是开始处，0表示开始处）
+// 		3.开始处时：注册链路追踪开始
+// 		4.记录需要链路追踪的字节数
 func traceGCSweepSpan(bytesSwept uintptr) {
-	_p_ := getg().m.p.ptr()
-	if _p_.traceSweep {
-		if _p_.traceSwept == 0 {
-			traceEvent(traceEvGCSweepStart, 1)
+	_p_ := getg().m.p.ptr() // 注释：获取当前p
+	if _p_.traceSweep {     // 注释：如果需要链路追踪
+		if _p_.traceSwept == 0 { // 注释：如果需要链路追踪的字节为0说明刚刚开始链路追踪
+			traceEvent(traceEvGCSweepStart, 1) // 注释：注册链路追踪开始
 		}
-		_p_.traceSwept += bytesSwept
+		_p_.traceSwept += bytesSwept // 注释：向链路追踪里添加清理的字节
 	}
 }
 
@@ -1165,7 +1171,7 @@ func traceGoSysExit(ts int64) {
 func traceGoSysBlock(pp *p) {
 	// Sysmon and stopTheWorld can declare syscalls running on remote Ps as blocked,
 	// to handle this we temporary employ the P.
-	// 注释：Sysmon和stopTheWorld可以将在远程P上运行的系统调用声明为阻塞，为了处理此问题，我们临时使用P。
+	// 注释：译：Sysmon和stopTheWorld可以将在远程P上运行的系统调用声明为阻塞，为了处理此问题，我们临时使用P。
 	mp := acquirem()                  // 注释：获取当前P。临时使用
 	oldp := mp.p                      // 注释：把P存储起来
 	mp.p.set(pp)                      // 注释：把传入的P替换当前的P，后面栈事件使用

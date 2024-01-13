@@ -24,7 +24,7 @@ type tmpBuf [tmpStringBufSize]byte
 // 注释：连接字符串
 func concatstrings(buf *tmpBuf, a []string) string {
 	idx := 0
-	l := 0 // 注释：有效的总字符串字节长度
+	l := 0     // 注释：有效的总字符串字节长度
 	count := 0 // 注释：有效的字符串个数
 	for i, x := range a {
 		n := len(x)
@@ -51,7 +51,7 @@ func concatstrings(buf *tmpBuf, a []string) string {
 	// 注释：通过字节数创建空间，返回字符串和指向字符串地址的[]byte,这样在下面就可以直接复制到[]byte里（间接复制到字符串里），然返回字符串
 	s, b := rawstringtmp(buf, l) // 注释：申请内存，返回string和slice，两个共用同一块内存，通过修改slice实现变更string
 	for _, x := range a {
-		copy(b, x) // 注释：复制到[]byte里
+		copy(b, x)     // 注释：复制到[]byte里
 		b = b[len(x):] // 注释：把b指针向后移动，移动到一下个x位置
 	}
 	return s
@@ -409,6 +409,8 @@ func atoi32(s string) (int32, bool) {
 	return 0, false
 }
 
+// 注释：查找0的下标，用户找C字符串的结尾位置。
+// 注释：以页为单位循环扫描字符串结尾，直到找到0结束，并返回字符串长度
 //go:nosplit
 func findnull(s *byte) int {
 	if s == nil {
@@ -418,6 +420,7 @@ func findnull(s *byte) int {
 	// Avoid IndexByteString on Plan 9 because it uses SSE instructions
 	// on x86 machines, and those are classified as floating point instructions,
 	// which are illegal in a note handler.
+	// 注释：译：在Plan 9中避免使用IndexByteString，因为它在x86计算机上使用SSE指令，并且这些指令被归类为浮点指令，在注释处理程序中是非法的。
 	if GOOS == "plan9" {
 		p := (*[maxAlloc/2 - 1]byte)(unsafe.Pointer(s))
 		l := 0
@@ -438,18 +441,19 @@ func findnull(s *byte) int {
 	// IndexByteString uses wide reads, so we need to be careful
 	// with page boundaries. Call IndexByteString on
 	// [ptr, endOfPage) interval.
-	safeLen := int(pageSize - uintptr(ptr)%pageSize)
+	safeLen := int(pageSize - uintptr(ptr)%pageSize) // 注释：最有一个页的数据，（可能不满整页，则用整页减去余数，精确扫描的长度）
 
+	// 注释：以页为单位循环扫描字符串结尾，直到找到0结束，并返回字符串长度
 	for {
-		t := *(*string)(unsafe.Pointer(&stringStruct{ptr, safeLen}))
+		t := *(*string)(unsafe.Pointer(&stringStruct{ptr, safeLen})) // 注释：构建字符串，临时使用
 		// Check one page at a time.
-		if i := bytealg.IndexByteString(t, 0); i != -1 {
+		if i := bytealg.IndexByteString(t, 0); i != -1 { // 注释：如果找到0返回该位置的偏移量
 			return offset + i
 		}
 		// Move to next page
-		ptr = unsafe.Pointer(uintptr(ptr) + uintptr(safeLen))
-		offset += safeLen
-		safeLen = pageSize
+		ptr = unsafe.Pointer(uintptr(ptr) + uintptr(safeLen)) // 注释：C字符串指针偏移，偏移到下一个页的开头处
+		offset += safeLen                                     // 注释：记录总长度
+		safeLen = pageSize                                    // 注释：(以页为单位循环扫描字符串结尾)页尺寸，（下一个月的大小）
 	}
 }
 
@@ -466,11 +470,12 @@ func findnullw(s *uint16) int {
 }
 
 // 注释：把slice转换成string（不复制数据）
+// 注释：返回字符串，str是C字符串，用0分隔多个字符串，这里就是把0前面的字符串拿出来，组成Go字符串并返回
 //go:nosplit
 func gostringnocopy(str *byte) string {
-	ss := stringStruct{str: unsafe.Pointer(str), len: findnull(str)}
-	s := *(*string)(unsafe.Pointer(&ss))
-	return s
+	ss := stringStruct{str: unsafe.Pointer(str), len: findnull(str)} // 注释：组装字符串结构体
+	s := *(*string)(unsafe.Pointer(&ss))                             // 注释：把字符串结构体指针转化成字符串
+	return s                                                         // 注释：返回字符串
 }
 
 func gostringw(strw *uint16) string {

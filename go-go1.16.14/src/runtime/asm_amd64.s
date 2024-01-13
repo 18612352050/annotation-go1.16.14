@@ -288,7 +288,8 @@ TEXT runtime·gosave(SB), NOSPLIT, $0-8
 
 // func gogo(buf *gobuf)
 // restore state from Gobuf; longjmp
-// 注释：执行gogo函数指令，执行gobuf（之前保存现场的位置）中的数据(g.sched类型是gobuf)
+// 注释：从Gobuf恢复状态并执行
+// 注释：执行gogo函数指令，执行gobuf（之前保存的）中的数据(g.sched类型是gobuf)
 TEXT runtime·gogo(SB), NOSPLIT, $16-8
 	MOVQ	buf+0(FP), BX		// 注释：获取入参的gobuf结构体放到BX寄存器中 // gobuf
 	MOVQ	gobuf_g(BX), DX     // 注释：取出G放到DX寄存器中
@@ -310,34 +311,37 @@ TEXT runtime·gogo(SB), NOSPLIT, $16-8
 // Switch to m->g0's stack, call fn(g).
 // Fn must never return. It should gogo(&g->sched)
 // to keep running g.
+// 注释：译：func mcall（fn func（*g））切换到m->g0的堆栈，调用fn（g）。Fn决不能再回来。它应该gogo（&g->sched）继续运行g。
+//
+// 注释：执行 runtime.mcall 函数的汇编函数
 TEXT runtime·mcall(SB), NOSPLIT, $0-8
-	MOVQ	fn+0(FP), DI
+	MOVQ	fn+0(FP), DI                    // 注释：(参数fn地址,闭包函数指令地址)第一个参数是闭包函数(存储的时候闭包函数指令的指针)
 
     // 注释：保存现场
-	get_tls(CX)
-	MOVQ	g(CX), AX	// save state in g->sched
-	MOVQ	0(SP), BX	// caller's PC
-	MOVQ	BX, (g_sched+gobuf_pc)(AX)
-	LEAQ	fn+0(FP), BX	// caller's SP
-	MOVQ	BX, (g_sched+gobuf_sp)(AX)
-	MOVQ	AX, (g_sched+gobuf_g)(AX)
-	MOVQ	BP, (g_sched+gobuf_bp)(AX)
+	get_tls(CX)                             // 注释：获取TLS的G地址，放到CX寄存器里(里第一个地址就是G地址)
+	MOVQ	g(CX), AX	                    // 注释：把G地址放到AX里 // save state in g->sched
+	MOVQ	0(SP), BX	                    // 注释：(要执行的PC)硬件寄存器栈指针(栈顶,低地址)(存储当前PC值) // caller's PC
+	MOVQ	BX, (g_sched+gobuf_pc)(AX)      // 注释：保存栈顶，低地址位置(硬件寄存器SP)
+	LEAQ	fn+0(FP), BX	                // 注释：(参数fn地址)第1个参数(闭包函数) // caller's SP
+	MOVQ	BX, (g_sched+gobuf_sp)(AX)      // 注释：保存第1个参数（闭包函数）
+	MOVQ	AX, (g_sched+gobuf_g)(AX)       // 注释：保存G
+	MOVQ	BP, (g_sched+gobuf_bp)(AX)      // 注释：保存BP基地址（栈低,高地址）
 
 	// switch to m->g0 & its stack, call fn
-	MOVQ	g(CX), BX
-	MOVQ	g_m(BX), BX
-	MOVQ	m_g0(BX), SI
-	CMPQ	SI, AX	// if g == m->g0 call badmcall
-	JNE	3(PC)
-	MOVQ	$runtime·badmcall(SB), AX
-	JMP	AX
-	MOVQ	SI, g(CX)	// g = m->g0
-	MOVQ	(g_sched+gobuf_sp)(SI), SP	// sp = m->g0->sched.sp
-	PUSHQ	AX
-	MOVQ	DI, DX
-	MOVQ	0(DI), DI
-	CALL	DI
-	POPQ	AX
+	MOVQ	g(CX), BX                       // 注释：当前业务G
+	MOVQ	g_m(BX), BX                     // 注释：当前业务G对应的M
+	MOVQ	m_g0(BX), SI                    // 注释：G0
+	CMPQ	SI, AX	                        // 注释：如果G0 == 当前业务G 则报错 // if g == m->g0 call badmcall
+	JNE	3(PC)                               // 注释：如果不相等则跳转到下面第三行
+	MOVQ	$runtime·badmcall(SB), AX       // 注释：如果相等则报错（把报错的指令函数地址放到AX里，后面执行）
+	JMP	AX                                  // 注释：如果相等则报错
+	MOVQ	SI, g(CX)	                    // 注释：切换到G0 // g = m->g0
+	MOVQ	(g_sched+gobuf_sp)(SI), SP	    // 注释：把G0里的SP拿出来 // sp = m->g0->sched.sp
+	PUSHQ	AX                              // 注释：(入栈)把业务G压入到栈里(AX是业务G)
+	MOVQ	DI, DX                          // 注释：把参数fn地址放到DX里
+	MOVQ	0(DI), DI                       // 注释：(拿出fn函数指令)闭包函数指令
+	CALL	DI                              // 注释：执行闭包函数(执行fn函数指令)
+	POPQ	AX                              // 注释：(出栈)从栈中踢出业务G
 	MOVQ	$runtime·badmcall2(SB), AX
 	JMP	AX
 	RET
@@ -351,7 +355,15 @@ TEXT runtime·systemstack_switch(SB), NOSPLIT, $0-0
 	RET
 
 // func systemstack(fn func())
-// 注释：切换到系统堆栈（系统堆栈指的就是g0，有独立的8M栈空间，负责调度G）
+// 注释：切换到系统堆栈执行闭包函数（系统堆栈指的就是g0，有独立的8M栈空间，负责调度G）
+// 注释：步骤：
+//      1.获取M下的G0（每个M下都有自己的G0）
+//      2.保存现场（把业务G的PC、SP、G、BP保存起来）
+//      3.切换G0（把G0替换业务G（TLS））
+//      4.执行闭包函数（此时是用G0执行的）
+//      5.切换回业务G
+//      6.恢复SP栈基指针（把业务的sp放回来）(业务G的参数赋值到栈的SP上)(SP存放函数参数访问头位置（基指针，栈低）)
+//      7.清楚备份的SP
 TEXT runtime·systemstack(SB), NOSPLIT, $0-8
 	MOVQ	fn+0(FP), DI	                    // 注释：获取一个入参（闭包函数的地址） // DI = fn
 	get_tls(CX)                                 // 注释：获取m的tls数据（线程的本地私有数据）(第一个元素就是存放G的地址)(程序当前运行的g会到这里找)
@@ -371,12 +383,14 @@ TEXT runtime·systemstack(SB), NOSPLIT, $0-8
 	// switch stacks
 	// save our state in g->sched. Pretend to
 	// be systemstack_switch if the G stack is scanned.
+	// 注释：译：切换堆栈，将我们的状态保存在g->sched中。如果扫描G堆栈，则假装为systemstack_switch。
 	MOVQ	$runtime·systemstack_switch(SB), SI // 注释：开始保存现场
 	MOVQ	SI, (g_sched+gobuf_pc)(AX)          // 注释：备份数据到g.sched.pc(g.gobuf_pc)(指令计数器)
 	MOVQ	SP, (g_sched+gobuf_sp)(AX)          // 注释：备份数据到g.sched.sp(g.gobuf_sp)(SP存放函数参数访问头位置(基指针，栈低))
 	MOVQ	AX, (g_sched+gobuf_g)(AX)           // 注释：备份数据到g.sched.g(g.gobuf_g)(当前运行的g地址)
 	MOVQ	BP, (g_sched+gobuf_bp)(AX)          // 注释：备份数据到g.sched.bp(g.gobuf_bp)
 
+    // 注释：切换到G0
 	// switch to g0                             // 注释：下面是把g0切换到g上(g0的备份的栈SP切换到当前运行的栈SP)
 	MOVQ	DX, g(CX)                           // 注释：把g.m.g0赋值到TLS(FS寄存器)对应的指针里(上面已经把G保存到g.sched里了（保存现场）)
 	MOVQ	(g_sched+gobuf_sp)(DX), BX          // 注释：复制g.m.g0.sched.sp的参数到BX（SP存放函数参数访问头位置(基指针，栈低)）
@@ -386,19 +400,21 @@ TEXT runtime·systemstack(SB), NOSPLIT, $0-8
 	MOVQ	DX, 0(BX)                           // 注释：把mstart放到0(SP)位置（扩容后0(SP)是空指针;8(SP)是g0.gobuf_sp的指针）(下面会启动线程，并且启动调度系统)
 	MOVQ	BX, SP                              // 注释：（把g0的SP替换当前SP）g0.gobuf_sp切换到栈上，后面可以执行该栈(模拟函数调用)(下面启动线程，并且启动调度系统)
 
+    // 注释：执行闭包函数
 	// call target function                     // 注释：下面是调用闭包指令
 	MOVQ	DI, DX                              // 注释：闭包函数地址(DI)赋值给DX寄存器
 	MOVQ	0(DI), DI                           // 注释：闭包函数体指令PC(0(DI))赋值到DI上（就是把闭包体的指令提取出来）
 	CALL	DI                                  // 注释：调用闭包体指令（调用PC指令(相当于调用闭包里的函数)）(执行完成后，回到g0的栈SP空间上)
 
+    // 注释：切换回业务G
 	// switch back to g                         // 注释：下面是把g切换回来
 	get_tls(CX)                                 // 注释：(g.m.g0)获取TLS数据(FS寄存器)（里面存储着G的指针）到CX寄存器里(这里只是存放G的一个指针)
 	MOVQ	g(CX), AX                           // 注释：(g0)把g0结构体赋值到AX里
 	MOVQ	g_m(AX), BX                         // 注释：(M)取g.m.g0.m
-	MOVQ	m_curg(BX), AX                      // 注释：取m.curg(一开始g.m.g0.m.curg等同于g.m.curg就是业务的g)（上面有判断m.curg一定等于业务，否则bad）
-	MOVQ	AX, g(CX)                           // 注释：把G切换到TLS(FS)对应的指针里
-	MOVQ	(g_sched+gobuf_sp)(AX), SP          // 注释：恢复SP （把业务的sp放回来）(业务G的参数赋值到栈的SP上)(SP存放函数参数访问头位置（基指针，栈低）)
-	MOVQ	$0, (g_sched+gobuf_sp)(AX)          // 注释：清除业务g备份的sp
+	MOVQ	m_curg(BX), AX                      // 注释：(当前要执行的业务G)取m.curg(一开始g.m.g0.m.curg等同于g.m.curg就是业务的g)（上面有判断m.curg一定等于业务，否则bad）
+	MOVQ	AX, g(CX)                           // 注释：把业务G切换到TLS(FS)对应的指针里
+	MOVQ	(g_sched+gobuf_sp)(AX), SP          // 注释：恢复SP（把业务的sp放回来）(业务G的参数赋值到栈的SP上)(SP存放函数参数访问头位置（基指针，栈低）)
+	MOVQ	$0, (g_sched+gobuf_sp)(AX)          // 注释：清除业务G备份的SP
 	RET                                         // 注释：返回
 
 noswitch:                              // 注释：不发生系统切换，直接执行闭包函数

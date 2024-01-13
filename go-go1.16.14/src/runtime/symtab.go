@@ -337,6 +337,7 @@ const (
 )
 
 // pcHeader holds data used by the pclntab lookups.
+// 注释：译：pcHeader保存pclntab查找所使用的数据。
 type pcHeader struct {
 	magic          uint32  // 0xFFFFFFFA
 	pad1, pad2     uint8   // 0,0
@@ -356,9 +357,11 @@ type pcHeader struct {
 // matched changes to the code in cmd/internal/ld/symtab.go:symtab.
 // moduledata is stored in statically allocated non-pointer memory;
 // none of the pointers here are visible to the garbage collector.
+// 注释：译：moduledata记录关于可执行映像的布局的信息。它是由链接器编写的。此处的任何更改都必须与cmd/internal/ld/symtab.go:symtab中的代码更改相匹配。
+//		moduledata存储在静态分配的非指针内存中；这里的指针对垃圾收集器都不可见。
 type moduledata struct {
 	pcHeader     *pcHeader
-	funcnametab  []byte
+	funcnametab  []byte // 注释：方法名称，多个用C字符串的0分隔
 	cutab        []uint32
 	filetab      []byte
 	pctab        []byte
@@ -425,7 +428,7 @@ type modulehash struct {
 // To make sure the map isn't collected, we keep a second reference here.
 var pinnedTypemaps []map[typeOff]*_type
 
-var firstmoduledata moduledata  // linker symbol
+var firstmoduledata moduledata  // 注释：全局方法链表的头元素 // linker symbol
 var lastmoduledatap *moduledata // linker symbol
 var modulesSlice *[]*moduledata // see activeModules
 
@@ -648,6 +651,7 @@ func (f *Func) FileLine(pc uintptr) (file string, line int) {
 	return file, int(line32)
 }
 
+// 注释：查找PC所在的函数，如果找到返回函数指针数据
 func findmoduledatap(pc uintptr) *moduledata {
 	for datap := &firstmoduledata; datap != nil; datap = datap.next {
 		if datap.minpc <= pc && pc < datap.maxpc {
@@ -659,8 +663,8 @@ func findmoduledatap(pc uintptr) *moduledata {
 
 // 注释：函数方法的详细信息
 type funcInfo struct {
-	*_func
-	datap *moduledata
+	*_func             // 注释：函数方法的基础信息
+	datap  *moduledata // 注释：函数方法的数据指针(单向链表结构)
 }
 
 func (f funcInfo) valid() bool {
@@ -833,15 +837,17 @@ func pcvalue(f funcInfo, off uint32, targetpc uintptr, cache *pcvalueCache, stri
 	return -1, 0
 }
 
+// 注释：返回方法名对应的C字符串首地址
 func cfuncname(f funcInfo) *byte {
 	if !f.valid() || f.nameoff == 0 {
 		return nil
 	}
-	return &f.datap.funcnametab[f.nameoff]
+	return &f.datap.funcnametab[f.nameoff] // 注释：返回方法名对应的C字符串首地址
 }
 
+// 注释：返回方法名称
 func funcname(f funcInfo) string {
-	return gostringnocopy(cfuncname(f))
+	return gostringnocopy(cfuncname(f)) // 注释：返回方法名称
 }
 
 func funcpkgpath(f funcInfo) string {

@@ -32,21 +32,21 @@ const (
 
 	// _Gidle means this goroutine was just allocated and has not
 	// yet been initialized.
-	_Gidle = iota // 0 // 注释：_Gidle=0 刚刚被分配并且还没有被初始化
+	_Gidle = iota // 0 // 注释：(空闲不执行)_Gidle=0 刚刚被分配并且还没有被初始化
 
 	// _Grunnable means this goroutine is on a run queue. It is
 	// not currently executing user code. The stack is not owned.
-	_Grunnable // 1 // 注释：_Grunnable=1 没有执行代码，没有栈的所有权，存储在运行队列中
+	_Grunnable // 1 // 注释：(准备执行)_Grunnable=1 没有执行代码，没有栈的所有权，存储在运行队列中
 
 	// _Grunning means this goroutine may execute user code. The
 	// stack is owned by this goroutine. It is not on a run queue.
 	// It is assigned an M and a P (g.m and g.m.p are valid).
-	_Grunning // 2 // 注释：_Grunning=2 可以执行代码，拥有栈的所有权，被赋予了内核线程 M 和处理器 P
+	_Grunning // 2 // 注释：(执行中)_Grunning=2 可以执行代码，拥有栈的所有权，被赋予了内核线程 M 和处理器 P
 
 	// _Gsyscall means this goroutine is executing a system call.
 	// It is not executing user code. The stack is owned by this
 	// goroutine. It is not on a run queue. It is assigned an M.
-	_Gsyscall // 3 // 注释：_Gsyscall=3 正在执行系统调用，没有执行用户代码，拥有栈的所有权，被赋予了内核线程 M 但是不在运行队列上
+	_Gsyscall // 3 // 注释：(系统调用)_Gsyscall=3 正在执行系统调用，没有执行用户代码，拥有栈的所有权，被赋予了内核线程 M 但是不在运行队列上
 
 	// _Gwaiting means this goroutine is blocked in the runtime.
 	// It is not executing user code. It is not on a run queue,
@@ -56,11 +56,11 @@ const (
 	// write parts of the stack under the appropriate channel
 	// lock. Otherwise, it is not safe to access the stack after a
 	// goroutine enters _Gwaiting (e.g., it may get moved).
-	_Gwaiting // 4 // 注释：_Gwaiting=4 由于运行时而被阻塞，没有执行用户代码并且不在运行队列上，但是可能存在于 Channel 的等待队列上。若需要时执行ready()唤醒
+	_Gwaiting // 4 // 注释：(等待中、挂起中)_Gwaiting=4 由于运行时而被阻塞，没有执行用户代码并且不在运行队列上，但是可能存在于 Channel 的等待队列上。若需要时执行ready()唤醒
 
 	// _Gmoribund_unused is currently unused, but hardcoded in gdb
 	// scripts.
-	_Gmoribund_unused // 5 // 注释：_Gmoribund_unused=5 当前此状态未使用，但硬编码在了gdb 脚本里，可以不用关注
+	_Gmoribund_unused // 5 // 注释：(该状态未使用)_Gmoribund_unused=5 当前此状态未使用，但硬编码在了gdb 脚本里，可以不用关注
 
 	// _Gdead means this goroutine is currently unused. It may be
 	// just exited, on a free list, or just being initialized. It
@@ -71,19 +71,19 @@ const (
 	_Gdead // 6 // 注释：_Gdead=6 没有被使用，可能刚刚退出，或在一个freelist；也或者刚刚被初始化；没有执行代码，可能有分配的栈也可能没有；G和分配的栈（如果已分配过栈）归刚刚退出G的M所有或从free list 中获取
 
 	// _Genqueue_unused is currently unused.
-	_Genqueue_unused // 7 // 注释：_Genqueue_unused=7 目前未使用，不用理会
+	_Genqueue_unused // 7 // 注释：(该状态未使用)_Genqueue_unused=7 目前未使用，不用理会
 
 	// _Gcopystack means this goroutine's stack is being moved. It
 	// is not executing user code and is not on a run queue. The
 	// stack is owned by the goroutine that put it in _Gcopystack.
-	_Gcopystack // 8 // 注释：_Gcopystack=8 栈正在被拷贝，没有执行代码，不在运行队列上
+	_Gcopystack // 8 // 注释：(栈拷贝中)_Gcopystack=8 栈正在被拷贝，没有执行代码，不在运行队列上
 
 	// _Gpreempted means this goroutine stopped itself for a
 	// suspendG preemption. It is like _Gwaiting, but nothing is
 	// yet responsible for ready()ing it. Some suspendG must CAS
 	// the status to _Gwaiting to take responsibility for
 	// ready()ing this G.
-	_Gpreempted // 9 // 注释：_Gpreempted=9 由于抢占而被阻塞，没有执行用户代码并且不在运行队列上，等待唤醒
+	_Gpreempted // 9 // 注释：(抢占阻塞)_Gpreempted=9 由于抢占而被阻塞，没有执行用户代码并且不在运行队列上，等待唤醒
 
 	// _Gscan combined with one of the above states other than
 	// _Grunning indicates that GC is scanning the stack. The
@@ -188,17 +188,24 @@ type mutex struct {
 //
 // notesleep/notetsleep are generally called on g0,
 // notetsleepg is similar to notetsleep but is called on user g.
+// 注释：译：一次性事件的睡眠和唤醒。在调用notesleep或notewakeup之前，必须调用noteclear来初始化Note。那么，正好有一个线程可以调用notesleep，正好有个线程可以（一次）调用notewakeup。
+//		一旦调用了notewakeup，notesleep就会返回。future notesleep将立即返回。只有在前一个notesleep返回后才能调用后续的noteclear，例如，不允许在notewakeup后直接调用noteclear。
+//		notesleep与notesleep类似，但在给定的纳秒数后会醒来，即使事件尚未发生。如果一个goroutine使用notesleep提前唤醒，它必须等待调用noteclear，
+//		直到它可以确定没有其他goroutine在调用notewakeup。notesleep/notesleep通常在g0上调用，notesleepg类似于notesleep，但在用户g上调用。
 type note struct {
 	// Futex-based impl treats it as uint32 key,
 	// while sema-based impl as M* waitm.
 	// Used to be a union, but unions break precise GC.
-	key uintptr // 注释：这里的值是【0或1或*M】0什么都不做，1表示已经是唤醒状态，*M待唤醒的M指针
+	key uintptr // 注释：值：0、1 、*M（M线程地址，用来唤醒或睡眠M）；意思是：0什么都不做，1表示已经是唤醒状态，*M是M线程指针用来唤醒或睡眠M
 }
 
+// 注释：存储方法的结构体
+// 注释：还有一些隐士的字段，参考 runtime.reflectMethodValue 结构体
 type funcval struct {
-	fn uintptr
+	fn uintptr // 注释：指令指针，PC值
 	// variable-size, fn-specific data here
 	// 注释：这里在newproc中定义了一个指针的大小用来存储P指针
+	// 注释：后面会有两个属性分别是(stack *bitvector 和 argLen uintptr，参考 reflectMethodValue )
 }
 
 // 注释：带方法签名的接口在运行时的具体结构体
@@ -388,7 +395,7 @@ type sudog struct {
 	// value was delivered over channel c, and false if awoken
 	// because c was closed.
 	// 注释：信道c上的通信是否成功。如果goroutine因为值通过通道c传递而被唤醒，则为true，如果因为c被关闭而被唤醒则为false
-	success bool // 注释：是否因通道唤醒
+	success bool // 注释：是否因通道唤醒(管道非关闭时唤醒为true，关闭时唤醒为false)
 
 	parent   *sudog // semaRoot binary tree
 	waitlink *sudog // 注释：阻塞链表 // g.waiting list or semaRoot
@@ -534,7 +541,7 @@ type m struct {
 	curg          *g       // 注释：指向工作线程m正在运行的g结构体对象,要确定g是在用户堆栈还是系统堆栈上运行，可以使用if getg() == getg().m.curg {用户态堆栈} else {系统堆栈} // current running goroutine
 	caughtsig     guintptr // goroutine running during fatal signal
 	p             puintptr // 注释：记录与当前工作线程绑定的p结构体对象 // attached p for executing go code (nil if not executing go code)
-	nextp         puintptr // 注释：新线程m要绑定的p（起始任务函数）(其他的m给新m设置该字段，当新m启动时会和当前字段的p进行绑定),其他M把P抢走后会设置这个字段告诉当前M如果执行时应该绑定其他的P
+	nextp         puintptr // 注释：(下一个要执行的P)新线程m要绑定的p（起始任务函数）(其他的m给新m设置该字段，当新m启动时会和当前字段的p进行绑定),其他M把P抢走后会设置这个字段告诉当前M如果执行时应该绑定其他的P
 	oldp          puintptr // 注释：在系统调用的时候把当前的P存放到这里，系统调用结束后拿出来 // the p that was attached before executing a syscall // 注释：在执行系统调用之前附加的p
 	id            int64    // 注释：M的ID
 	mallocing     int32    // 注释：正在申请内存标识(0否1是)，当申请内存的开头会检查这个字段，如果已经在申请了，则报错，
@@ -543,7 +550,7 @@ type m struct {
 	locks         int32    // 注释：给M加锁;(禁用抢占)大于0时说明正在g正在被使用，系统调用后置函数的时候有使用（获取时++，释放是--）
 	dying         int32
 	profilehz     int32
-	spinning      bool // 注释：是否自旋，自旋就表示M正在找G来运行，表示当前工作线程m正在试图从其它工作线程m的本地运行队列偷取g // m is out of work and is actively looking for work
+	spinning      bool // 注释：（我开始要抢别人了）是否自旋，自旋就表示M正在找G来运行，表示当前工作线程m正在试图从其它工作线程m的本地运行队列偷取g // m is out of work and is actively looking for work
 	blocked       bool // 注释：m是否被阻塞 // m is blocked on a note
 	newSigstack   bool // minit on C thread called sigaltstack
 	printlock     int8
@@ -565,8 +572,8 @@ type m struct {
 	lockedExt     uint32                        // tracking for external LockOSThread
 	lockedInt     uint32                        // tracking for internal lockOSThread
 	nextwaitm     muintptr                      // next m waiting for lock
-	waitunlockf   func(*g, unsafe.Pointer) bool // 注释：解除等待锁指针的函数
-	waitlock      unsafe.Pointer                // 注释：等待锁指针
+	waitunlockf   func(*g, unsafe.Pointer) bool // 注释：(解除等待钩子)解除等待函数，G0(系统栈-系统协成执)行完成后会调用该函数(函数执行万成后会清空)
+	waitlock      unsafe.Pointer                // 注释：(解除等待钩子)解除等待函数参数，(函数执行万成后会清空)
 	waittraceev   byte                          // 注释：等待追踪事件类型
 	waittraceskip int                           // 注释：跳过几层事件追踪的结果（事件追踪结果中从哪一级返回数据，跳过的是不重要的）
 	startingtrace bool                          // 注释：是否已经开始栈追踪
@@ -676,10 +683,12 @@ type p struct {
 	// traceSweep indicates the sweep events should be traced.
 	// This is used to defer the sweep start event until a span
 	// has actually been swept.
-	traceSweep bool // 注释：
+	// 注释：译：traceSweep表示应该跟踪扫描事件。这用于推迟扫描开始事件，直到实际扫描了一个跨度。
+	traceSweep bool // 注释：清理是是否需要链路追踪
 	// traceSwept and traceReclaimed track the number of bytes
 	// swept and reclaimed by sweeping in the current sweep loop.
-	traceSwept, traceReclaimed uintptr
+	// 注释：译：traceSwept和traceReclaimed跟踪当前扫描循环中通过扫描扫描和回收的字节数。
+	traceSwept, traceReclaimed uintptr // 注释：traceSwept是清理时需要链路追踪的字节,0代表链路追踪的开始；traceReclaimed是回收的字节
 
 	palloc persistentAlloc // per-P to avoid mutex
 
@@ -870,9 +879,12 @@ const (
 // See https://golang.org/s/go12symtab.
 // Keep in sync with linker (../cmd/link/internal/ld/pcln.go:/pclntab)
 // and with package debug/gosym and with symtab.go in package runtime.
+// 注释：译：链接器准备的内存中每个函数信息的布局请参阅https://golang.org/s/go12symtab.
+//		在包运行时与链接器（../cmd/link/internal/ld/pcln.go:/pclntab）、包调试/gosym和symtab.go保持同步。
+// 函数方法的基础信息
 type _func struct {
 	entry   uintptr // start pc
-	nameoff int32   // function name
+	nameoff int32   // 注释：方法名称头指针偏移量，这个方法名称存储在一个大的C字符串中，多个用0分隔，这里记录C字符串头指针的偏移量 // function name
 
 	args        int32  // in/out args size
 	deferreturn uint32 // offset of start of a deferreturn call instruction from entry, if any.
@@ -1010,6 +1022,7 @@ type _panic struct {
 }
 
 // stack traces
+// 注释：堆栈跟踪
 type stkframe struct {
 	fn       funcInfo   // function being run
 	pc       uintptr    // program counter within fn

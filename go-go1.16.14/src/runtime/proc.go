@@ -302,22 +302,28 @@ func goschedguarded() {
 
 // Puts the current goroutine into a waiting state and calls unlockf on the
 // system stack.
+// 注释：译：将当前goroutine置于等待状态，并在系统堆栈上调用unlock。
 //
 // If unlockf returns false, the goroutine is resumed.
+// 注释：译：如果unlock返回false，则goroutine将恢复。
 //
 // unlockf must not access this G's stack, as it may be moved between
 // the call to gopark and the call to unlockf.
+// 注释：译：unlock不能访问这个G的堆栈，因为它可能在对gopark的调用和对unlock的调用之间移动。
 //
 // Note that because unlockf is called after putting the G into a waiting
 // state, the G may have already been readied by the time unlockf is called
 // unless there is external synchronization preventing the G from being
 // readied. If unlockf returns false, it must guarantee that the G cannot be
 // externally readied.
+// 注释：译：注意，因为unlock f是在将G置于等待状态之后调用的，所以在调用unlock f时G可能已经准备好了，除非有外部同步阻止G准备好。如果unlock返回false，它必须保证G不能从外部准备好。
 //
 // Reason explains why the goroutine has been parked. It is displayed in stack
 // traces and heap dumps. Reasons should be unique and descriptive. Do not
 // re-use reasons, add new ones.
-// 注释：(让渡控制权，当前携程G阻塞)把go代码停车；延迟执行。把要执行的方法放在mp.wait...前缀里，等待唤醒的时候执行
+// 注释：译：原因解释了为什么goroutine停了下来。它显示在堆栈跟踪和堆转储中。原因应具有唯一性和描述性。不要重复使用原因，添加新的原因。
+//
+// 注释：(让渡控制权，当前协成G阻塞)把go代码停车；延迟执行。把要执行的方法放在mp.wait...前缀里，等待唤醒的时候执行
 func gopark(unlockf func(*g, unsafe.Pointer) bool, lock unsafe.Pointer, reason waitReason, traceEv byte, traceskip int) {
 	if reason != waitReasonSleep {
 		checkTimeouts() // timeouts may expire while two goroutines keep the scheduler busy
@@ -330,7 +336,7 @@ func gopark(unlockf func(*g, unsafe.Pointer) bool, lock unsafe.Pointer, reason w
 		throw("gopark: bad g status")
 	}
 	mp.waitlock = lock           // 注释：设置等待锁
-	mp.waitunlockf = unlockf     // 注释：设置解除等待锁的函数
+	mp.waitunlockf = unlockf     // 注释：设置解除等待锁的函数，系统协成执行完成后会调用该函数
 	gp.waitreason = reason       // 注释：设置锁的原因
 	mp.waittraceev = traceEv     // 注释：设置等待追踪事件类型
 	mp.waittraceskip = traceskip // 注释：跳过几级事件追踪结果
@@ -346,10 +352,11 @@ func goparkunlock(lock *mutex, reason waitReason, traceEv byte, traceskip int) {
 }
 
 // 注释：把gp放到下traceskip个位置上等待执行
+// 注释：准备下一个要执行G，并且开启一个空闲M跑空闲P
 func goready(gp *g, traceskip int) {
 	// 注释：系统栈切换，把gp放到下traceskip个执行的栈位置上
-	systemstack(func() {
-		ready(gp, traceskip, true)
+	systemstack(func() { // 注释：切换系统栈调用(切换到G0上执行)，每个M下都有自己G0
+		ready(gp, traceskip, true) // 注释：准备下一个要执行G，并且开启一个空闲M跑空闲P
 	})
 }
 
@@ -792,26 +799,37 @@ func fastrandinit() {
 }
 
 // Mark gp ready to run.
+// 注释：译：标记gp准备运行。
+// 注释：准备下一个要执行G，并且开启一个空闲M跑空闲P
+// 注释：把G从等待状态变更成准备执行状态（_Grunnable）
+// 注释：(典型的自己不让抢，启动一个空闲P去抢别人的 哈)
+// 注释：步骤：
+//		1.当前M禁止抢占
+//		2.把gp放到本地P队列，并标记下一个就执行；
+//		3.拿个空闲M线程运行空闲P，并且自旋，开始抢别的G了
+//		4.当前M解除禁止抢占
 func ready(gp *g, traceskip int, next bool) {
 	if trace.enabled {
 		traceGoUnpark(gp, traceskip)
 	}
 
-	status := readgstatus(gp)
+	status := readgstatus(gp) // 注释：获取gp的状态
 
 	// Mark runnable.
-	_g_ := getg()
-	mp := acquirem() // disable preemption because it can be holding p in a local var
-	if status&^_Gscan != _Gwaiting {
-		dumpgstatus(gp)
-		throw("bad g->status in ready")
+	// 注释：译：标记为可运行。
+	_g_ := getg()                    // 注释：获取G
+	mp := acquirem()                 // 注释：禁止抢占 // disable preemption because it can be holding p in a local var
+	if status&^_Gscan != _Gwaiting { // 注释：(如果gp状态不是等待时报错)status清空_Gscan位后如果不等于_Gwaiting时报错
+		dumpgstatus(gp)                 // 注释：打印日志
+		throw("bad g->status in ready") // 注释：报错
 	}
 
 	// status is Gwaiting or Gscanwaiting, make Grunnable and put on runq
-	casgstatus(gp, _Gwaiting, _Grunnable)
-	runqput(_g_.m.p.ptr(), gp, next)
-	wakep()
-	releasem(mp)
+	// 注释：译：状态为Gwaiting或Gscanwaiting，使Grunable变为runq
+	casgstatus(gp, _Gwaiting, _Grunnable) // 注释：如果gp状态是_Gwaiting时并更状态为_Grunnable
+	runqput(_g_.m.p.ptr(), gp, next)      // 注释：把G放到本地P队列里，如果next是true则下一个就执行gp
+	wakep()                               // 注释：拿个空闲M线程运行空闲P，并且自旋，开始抢别的G了
+	releasem(mp)                          // 注释：释放禁止抢占(典型的自己不让抢，启动一个空闲P去抢别人的哈)
 }
 
 // freezeStopWait is a large value that freezetheworld sets
@@ -2347,20 +2365,26 @@ func mspinning() {
 }
 
 // Schedules some M to run the p (creates an M if necessary).
-// 注释：安排一些M来运行p（如果需要，创建一个M）。
 // If p==nil, tries to get an idle P, if no idle P's does nothing.
-// 注释：如果p==nil，则尝试获取空闲p，如果没有空闲p则什么也不做。
 // May run with m.p==nil, so write barriers are not allowed.
-// 注释：可能以m.p==nil运行，因此不允许写入障碍。
 // If spinning is set, the caller has incremented nmspinning and startm will
 // either decrement nmspinning or set m.spinning in the newly started M.
-// 注释：如果设置了spinning，调用者将增加nmspinning，startm将减少nmspinning或在新启动的m中设置m.spinning。
 // Callers passing a non-nil P must call from a non-preemptible context. See
 // comment on acquirem below.
-// 注释：传递非nil P的调用方必须从非抢占上下文调用。看见下面是对收购的评论。
 // Must not have write barriers because this may be called without a P.
-// 注释：不能有写障碍，因为这可能在没有P的情况下调用。
-// 注释：通过p去跑m
+// 注释：译：安排一些M来运行p（如果需要，创建一个M）。如果p==nil，则尝试获取空闲p，如果没有空闲p则什么也不做。可能以m.p==nil运行，因此不允许写入障碍。如果设置了spinning，调用者将增加nmspinning，
+//		startm将减少nmspinning或在新启动的m中设置m.spinning。传递非nil P的调用方必须从非抢占上下文调用。看见下面是对收购的评论。不能有写障碍，因为这可能在没有P的情况下调用。
+// 注释：用M把P进行连接，然后想系统发送信号，唤醒这个M
+// 注释：拿个M去跑P，如果没有拿到M则创建新的M；如果P为nil，创建一个空闲P。
+// 注释：参数spinning：是否自旋，表示开始抢别的G了
+// 注释：步骤：
+//		1.当前M禁止抢占
+//		2.获取P（如果参数_p_有值则使用，否则拿个空闲P，如果没有空闲P则解除抢占并退出)
+//		3.获取新M（获取空闲M，如果没有则创建新M）
+//		4.新M设置自旋（等于参数spinning）
+//		5.新M设置下一个要执行的P，当新M被唤醒时第一个执行的P
+//		6.唤醒线程M（以系统信号的方式，不同系统采用不同的方法实现）
+//		7.当前M解除禁止抢占
 //go:nowritebarrierrec
 func startm(_p_ *p, spinning bool) {
 	// Disable preemption.
@@ -2446,9 +2470,9 @@ func startm(_p_ *p, spinning bool) {
 		throw("startm: p has runnable gs")
 	}
 	// The caller incremented nmspinning, so set m.spinning in the new M.
-	nmp.spinning = spinning // 注释；新线程m设置可以试图抢占
-	nmp.nextp.set(_p_)      // 注释：新线程m下一个要执行的p（起始任务函数）
-	notewakeup(&nmp.park)   // 注释：向系统发送信号，通知新线程m唤醒(不同操作做系统走不同的文件)
+	nmp.spinning = spinning // 注释；（我开始要抢别人了）新线程m设置可以试图抢占
+	nmp.nextp.set(_p_)      // 注释：(设置下一个要执行的P)新线程m下一个要执行的p（起始任务函数）(nmp.nextp = _p_)
+	notewakeup(&nmp.park)   // 注释：（唤醒线程M，以系统信号的方式）向系统发送信号，通知新线程m唤醒(不同操作做系统走不同的文件)
 	// Ownership transfer of _p_ committed by wakeup. Preemption is now
 	// safe.
 	releasem(mp) // 注释：释放线程m
@@ -2521,8 +2545,10 @@ func handoffp(_p_ *p) {
 	}
 }
 
-// Tries to add one more P to execute G's.            // 注释：尝试再添加一个P以执行G。
-// Called when a G is made runnable (newproc, ready). // 注释：当G可以运行时调用（newproc，ready）。
+// Tries to add one more P to execute G's.
+// Called when a G is made runnable (newproc, ready).
+// 注释：译：尝试再添加一个P以执行G。当G可以运行时调用（newproc，ready）。
+// 注释：拿个空闲M线程运行空闲P，并且自旋，开始抢别的G了
 func wakep() {
 	if atomic.Load(&sched.npidle) == 0 {
 		return
@@ -2531,7 +2557,7 @@ func wakep() {
 	if atomic.Load(&sched.nmspinning) != 0 || !atomic.Cas(&sched.nmspinning, 0, 1) {
 		return
 	}
-	startm(nil, true)
+	startm(nil, true) // 注释：拿个空闲M线程运行空闲P，并且自旋，开始抢别的G了
 }
 
 // Stops execution of the current m that is locked to a g until the g is runnable again.
@@ -2616,9 +2642,13 @@ func gcstopm() {
 // If inheritTime is true, gp inherits the remaining time in the
 // current time slice. Otherwise, it starts a new time slice.
 // Never returns.
+// 注释：译：计划gp在当前M上运行。如果inheritTime为true，则gp将继承当前时间片中的剩余时间。否则，它将启动一个新的时间片。永不回头。
 //
 // Write barriers are allowed because this is called immediately after
 // acquiring a P in several places.
+// 注释：译：写入障碍是允许的，因为这是在几个地方获得P后立即调用的。
+//
+// 注释：如果inheritTime是true则立刻执行gp
 //
 //go:yeswritebarrierrec
 func execute(gp *g, inheritTime bool) {
@@ -2626,7 +2656,7 @@ func execute(gp *g, inheritTime bool) {
 
 	// Assign gp.m before entering _Grunning so running Gs have an
 	// M.
-	_g_.m.curg = gp                       // 注释：把要执行的G绑定到当前G的M对应的当前G上
+	_g_.m.curg = gp                       // 注释：(还原业务G)把要执行的G绑定到当前G的M对应的当前G上
 	gp.m = _g_.m                          // 注释：把要执行的G对应的M绑定到当前已经存在的G对应的M上
 	casgstatus(gp, _Grunnable, _Grunning) // 注释：更新G的状态为运行中
 	gp.waitsince = 0
@@ -2652,7 +2682,7 @@ func execute(gp *g, inheritTime bool) {
 		traceGoStart()
 	}
 
-	gogo(&gp.sched) // 注释：真正执行G里的指令(在G休眠的时候会保存现场，保存现场就是保存到&gp.sched里，所以唤醒后执行这里的指令)
+	gogo(&gp.sched) // 注释：(执行)真正执行G里的指令(在G休眠的时候会保存现场，保存现场就是保存到&gp.sched里，所以唤醒后执行这里的指令)
 }
 
 // Finds a runnable goroutine to execute.
@@ -3305,11 +3335,16 @@ top:
 // appropriate time. After calling dropg and arranging for gp to be
 // readied later, the caller can do other work but eventually should
 // call schedule to restart the scheduling of goroutines on this m.
+// 注释：译：dropg删除了m和当前goroutine m->curg（简称gp）之间的关联。通常情况下，调用者将gp的状态设置为远离Grunning，然后立即调用dropg来完成作业。
+//		调用方还负责安排在适当的时间使用ready重新启动gp。在调用dropg并安排稍后准备gp之后，调用者可以做其他工作，但最终应该调用schedule来重新启动该m上goroutines的调度。
+// 注释：删除当前线程M的G，并把G和M的关系一并删除
+// 注释：删除当前G(可能是G0、业务G)和M的联系
+// 注释：删除当前G
 func dropg() {
-	_g_ := getg()
+	_g_ := getg() // 注释：获取当前G
 
-	setMNoWB(&_g_.m.curg.m, nil)
-	setGNoWB(&_g_.m.curg, nil)
+	setMNoWB(&_g_.m.curg.m, nil) // 注释：删除当前线程M对应G和M的关系
+	setGNoWB(&_g_.m.curg, nil)   // 注释：删除当前线程M的G
 }
 
 // checkTimers runs any timers for the P that are ready.
@@ -3383,6 +3418,8 @@ func parkunlock_c(gp *g, lock unsafe.Pointer) bool {
 }
 
 // park continuation on g0.
+// 注释：在G0上执行，参数gp是业务G
+// 注释：设置业务G的状态为等待（_Gwaiting）
 func park_m(gp *g) {
 	_g_ := getg()
 
@@ -3390,22 +3427,23 @@ func park_m(gp *g) {
 		traceGoPark(_g_.m.waittraceev, _g_.m.waittraceskip)
 	}
 
-	casgstatus(gp, _Grunning, _Gwaiting)
-	dropg()
+	casgstatus(gp, _Grunning, _Gwaiting) // 注释：业务G设置状态为等待（_Gwaiting）
+	dropg()                              // 注释：(解除等待)删除G0和M的绑定
 
-	if fn := _g_.m.waitunlockf; fn != nil {
-		ok := fn(gp, _g_.m.waitlock)
-		_g_.m.waitunlockf = nil
-		_g_.m.waitlock = nil
+	// 注释：解除等待，执行钩子函数
+	if fn := _g_.m.waitunlockf; fn != nil { // 注释：解除等待函数钩子，如果定义，解除等待则执行
+		ok := fn(gp, _g_.m.waitlock) // 注释：执行钩子函数
+		_g_.m.waitunlockf = nil      // 注释：清空钩子函数
+		_g_.m.waitlock = nil         // 注释：清空钩子函数的参数
 		if !ok {
 			if trace.enabled {
 				traceGoUnpark(gp, 2)
 			}
-			casgstatus(gp, _Gwaiting, _Grunnable)
-			execute(gp, true) // Schedule it back, never returns.
+			casgstatus(gp, _Gwaiting, _Grunnable) // 注释：如果钩子函数执行失败则把业务G状态设置为准备执行(_Grunnable)
+			execute(gp, true)                     // 注释：立刻执行业务G // Schedule it back, never returns. // 注释：译：把它安排回来，永远不会回来。
 		}
 	}
-	schedule()
+	schedule() // 注释：执行下一轮调度
 }
 
 func goschedImpl(gp *g) {
@@ -5951,7 +5989,7 @@ const randomizeScheduler = raceenabled // 注释：随机打乱P队列的G位置
 // Executed only by the owner P.
 // 注释：仅提供P的所有者执行
 //
-// 注释：把全局的gp放到本地队列_p_里
+// 注释：把gp放到本地队列_p_里，并且标记是否下一就执行
 // 注释：把G放到P队列里，next表示是否下一个就马上处理gp
 func runqput(_p_ *p, gp *g, next bool) {
 	if randomizeScheduler && next && fastrand()%2 == 0 {

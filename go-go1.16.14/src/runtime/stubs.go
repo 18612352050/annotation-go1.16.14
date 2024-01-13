@@ -26,18 +26,24 @@ func getg() *g
 
 // mcall switches from the g to the g0 stack and invokes fn(g),
 // where g is the goroutine that made the call.
+// 注释：译：mcall从g切换到g0堆栈并调用fn（g），其中g是进行调用的goroutine。
 // mcall saves g's current PC/SP in g->sched so that it can be restored later.
 // It is up to fn to arrange for that later execution, typically by recording
 // g in a data structure, causing something to call ready(g) later.
+// 注释：译：mcall将g当前的PC/SP保存在g->sched中，以便以后可以恢复。这取决于fn来安排稍后的执行，通常是通过在数据结构中记录g，使某些东西稍后调用ready（g）。
 // mcall returns to the original goroutine g later, when g has been rescheduled.
 // fn must not return at all; typically it ends by calling schedule, to let the m
 // run other goroutines.
+// 注释：译：稍后，当g被重新安排时，mcall返回到原来的goroutine g。fn不得返回；通常它以调用schedule结束，让m运行其他goroutine。
 //
 // mcall can only be called from g stacks (not g0, not gsignal).
+// 注释：译：只能从g堆栈调用mcall（不是g0，也不是gsignal）。
 //
 // This must NOT be go:noescape: if fn is a stack-allocated closure,
 // fn puts g on a run queue, and g executes before fn returns, the
 // closure will be invalidated while it is still executing.
+// 注释：译：这一定不能去：noescape：如果fn是一个堆栈分配的闭包，fn将g放在运行队列中，并且g在fn返回之前执行，则闭包在执行时将无效。
+//
 // 注释：保存现场; 汇编函数是：TEXT runtime·mcall(SB), NOSPLIT, $0-8
 func mcall(fn func(*g))
 
@@ -61,7 +67,7 @@ func mcall(fn func(*g))
 // 注释：切换到系统堆栈（系统堆栈指的就是g0，有独立的8M栈空间，负责调度G），汇编位置：TEXT runtime·systemstack(SB), NOSPLIT, $0-8
 //
 //go:noescape
-func systemstack(fn func())
+func systemstack(fn func()) // 注释：切换系统栈执行
 
 var badsystemstackMsg = "fatal: systemstack called from unexpected goroutine"
 
@@ -92,10 +98,8 @@ func badsystemstack() {
 //
 // The (CPU-specific) implementations of this function are in memclr_*.s.
 //
-// 注释：ptr指针向后删除n个字节
-//
 //go:noescape
-func memclrNoHeapPointers(ptr unsafe.Pointer, n uintptr)
+func memclrNoHeapPointers(ptr unsafe.Pointer, n uintptr) // 注释：0填充ptr指针向后n个字节，初始化内存（清空内存，用于申请后的0填充动作，汇编实现）
 
 //go:linkname reflect_memclrNoHeapPointers reflect.memclrNoHeapPointers
 func reflect_memclrNoHeapPointers(ptr unsafe.Pointer, n uintptr) {
@@ -187,7 +191,7 @@ func noescape(p unsafe.Pointer) unsafe.Pointer {
 func cgocallback(fn, frame, ctxt uintptr)
 
 // 注释：调用汇编函数：TEXT runtime·gogo(SB), NOSPLIT, $16-8
-func gogo(buf *gobuf)
+func gogo(buf *gobuf) // 注释：从gobuf恢复状态并执行
 func gosave(buf *gobuf)
 
 //go:noescape
@@ -359,11 +363,13 @@ func alignUp(n, a uintptr) uintptr {
 }
 
 // alignDown rounds n down to a multiple of a. a must be a power of 2.
+// 注释：向下取a整
 func alignDown(n, a uintptr) uintptr {
 	return n &^ (a - 1)
 }
 
 // divRoundUp returns ceil(n / a).
+// 注释：向上取a整
 func divRoundUp(n, a uintptr) uintptr {
 	// a is generally a power of two. This will get inlined and
 	// the compiler will optimize the division.
