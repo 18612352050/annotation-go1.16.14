@@ -66,7 +66,7 @@ func (c *mcentral) init(spc spanClass) {
 // 注释：每两个为一组（舍去一位然后取模）
 // 注释：sweepgena为GC清理计数器，partial是有空闲的数组数据，数组有两个元素，分别是已清理和未清理数据，会根据清理计数器实现位置调换
 // 注释：未清理是根据清理计数器（清理版本）计算出来的，把partial分为两组，每次清理开始处自增2，调换已清理和为清理的位置进行清理动作，执行未清理数据的清理工作
-// 注释：【有空闲、未清理】
+// 注释：【有空闲、未清理】部分未清扫
 func (c *mcentral) partialUnswept(sweepgen uint32) *spanSet {
 	return &c.partial[1-sweepgen/2%2] // 注释：代码贡献者大意了！安装之前的惯例写法应该是  return &c.partial[sweepgen>>1&1 ^ 1]
 }
@@ -74,7 +74,7 @@ func (c *mcentral) partialUnswept(sweepgen uint32) *spanSet {
 // partialSwept returns the spanSet which holds partially-filled
 // swept spans for this sweepgen.
 // 注释：sweepgena为GC扫描的计数器，每次GC扫描完成后自增2，实现已扫描和未扫描的数组下标切换
-// 注释：【有空闲、已清理】
+// 注释：【有空闲、已清理】部分清扫
 func (c *mcentral) partialSwept(sweepgen uint32) *spanSet {
 	return &c.partial[sweepgen/2%2] // 注释：代码贡献者大意了！安装之前的惯例写法应该是  return &c.partial[sweepgen>>1&1]
 }
@@ -82,16 +82,17 @@ func (c *mcentral) partialSwept(sweepgen uint32) *spanSet {
 // fullUnswept returns the spanSet which holds unswept spans without any
 // free slots for this sweepgen.
 // 注释：sweepgena为GC扫描的计数器，每次GC扫描完成后自增2，实现已扫描和未扫描的数组下标切换
-// 注释：【无空闲、已清理】
+// 注释：【无空闲、已清理】全部未清扫
 func (c *mcentral) fullUnswept(sweepgen uint32) *spanSet {
 	return &c.full[1-sweepgen/2%2] // 注释：代码贡献者大意了！安装之前的惯例写法应该是  return &c.full[sweepgen>>1&1 ^ 1]
 }
 
 // fullSwept returns the spanSet which holds swept spans without any
 // free slots for this sweepgen.
-// 注释：(无空闲、已扫描)无空闲并且被GC扫描的span
+// 注释：无空闲并且被GC扫描的span
 // 注释：每两个为一组（舍去一位然后取模）
 // 注释：sweepgena为GC扫描的计数器，每次GC扫描完成后自增2，实现已扫描和未扫描的数组下标切换
+// 注释：【无空闲、已扫描】全部清扫
 func (c *mcentral) fullSwept(sweepgen uint32) *spanSet {
 	return &c.full[sweepgen/2%2] // 注释：代码贡献者大意了！安装之前的惯例写法应该是  return &c.full[sweepgen>>1&1]
 }
@@ -138,14 +139,16 @@ func (c *mcentral) cacheSpan() *mspan {
 	var s *mspan
 
 	// Try partial swept spans first.
-	if s = c.partialSwept(sg).pop(); s != nil { // 注释：从【有空闲、已清理】链表出栈span，如果有则直接返回
+	// 注释：译：先尝试部分清扫跨度。
+	if s = c.partialSwept(sg).pop(); s != nil { // 注释：从部分清扫【有空闲、已清理】链表出栈span，如果有则直接返回
 		goto havespan
 	}
 
 	// Now try partial unswept spans.
-	// 注释：下面是尝试从【有空闲、未清理】中获取span
+	// 注释：译：现在尝试部分未清扫的跨度
+	// 注释：下面是从部分未清扫【有空闲、未清理】中找
 	for ; spanBudget >= 0; spanBudget-- {
-		s = c.partialUnswept(sg).pop() // 注释：到【有空闲、为清理】链表出栈span
+		s = c.partialUnswept(sg).pop() // 注释：到部分未清扫【有空闲、未清理】链表出栈span
 		if s == nil {                  // 注释：入股没有则跳过
 			break
 		}
@@ -194,24 +197,26 @@ func (c *mcentral) cacheSpan() *mspan {
 	}
 
 	// At this point s is a span that should have free slots.
+	// 注释：译：此时，s是一个应具有空闲插槽的跨度。
 havespan:
-	if trace.enabled && !traceDone {
-		traceGCSweepDone()
+	if trace.enabled && !traceDone { // 注释：开启链路追踪并且没有结束
+		traceGCSweepDone() // 注释：(关闭GC清理时链路追踪表示)标记链路追踪结束
 	}
-	n := int(s.nelems) - int(s.allocCount)
+	n := int(s.nelems) - int(s.allocCount) // 注释：未分配的块数量
 	if n == 0 || s.freeindex == s.nelems || uintptr(s.allocCount) == s.nelems {
-		throw("span has no free objects")
+		throw("span has no free objects") // 注释：span没有可用对象
 	}
-	freeByteBase := s.freeindex &^ (64 - 1)
-	whichByte := freeByteBase / 8
+	freeByteBase := s.freeindex &^ (64 - 1) // 注释：清空后5位
+	whichByte := freeByteBase / 8           // 注释：已经分配过的位置，是8的倍数（8个一组）
 	// Init alloc bits cache.
-	s.refillAllocCache(whichByte)
+	// 注释：译：初始分配的位图缓存
+	s.refillAllocCache(whichByte) // 注释：重新缓存64个空的块到快速缓冲区里
 
 	// Adjust the allocCache so that s.freeindex corresponds to the low bit in
 	// s.allocCache.
-	s.allocCache >>= s.freeindex % 64
+	s.allocCache >>= s.freeindex % 64 // 注释：移除要被只用的空块，(s.freeindex是下一个空块的下标)
 
-	return s
+	return s // 注释：返回mspan
 }
 
 // Return span from an mcache.

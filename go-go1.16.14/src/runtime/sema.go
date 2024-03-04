@@ -51,9 +51,11 @@ var semtable [semTabSize]struct {
 	pad  [cpu.CacheLinePadSize - unsafe.Sizeof(semaRoot{})]byte
 }
 
+// 注释：别名：sync.runtime_Semacquire
+// 注释：获取设置信号量
 //go:linkname sync_runtime_Semacquire sync.runtime_Semacquire
 func sync_runtime_Semacquire(addr *uint32) {
-	semacquire1(addr, false, semaBlockProfile, 0)
+	semacquire1(addr, false, semaBlockProfile, 0) // 注释：获取设置信号量
 }
 
 //go:linkname poll_runtime_Semacquire internal/poll.runtime_Semacquire
@@ -61,9 +63,11 @@ func poll_runtime_Semacquire(addr *uint32) {
 	semacquire1(addr, false, semaBlockProfile, 0)
 }
 
+// 注释：别名：sync.runtime_Semrelease
+// 注释：信号量释放
 //go:linkname sync_runtime_Semrelease sync.runtime_Semrelease
 func sync_runtime_Semrelease(addr *uint32, handoff bool, skipframes int) {
-	semrelease1(addr, handoff, skipframes)
+	semrelease1(addr, handoff, skipframes) // 注释：信号量释放
 }
 
 //go:linkname sync_runtime_SemacquireMutex sync.runtime_SemacquireMutex
@@ -91,18 +95,21 @@ const (
 )
 
 // Called from runtime.
+// 注释：译：从运行时调用。
+// 注释：获取信号量(获取、设置)
 func semacquire(addr *uint32) {
-	semacquire1(addr, false, 0, 0)
+	semacquire1(addr, false, 0, 0) // 注释：获取信号量(获取、设置)
 }
 
-// 注释：获取设置信号量
+// 注释：获取信号量(获取、设置)
 func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes int) {
-	gp := getg()
-	if gp != gp.m.curg {
+	gp := getg()         // 注释：获取G
+	if gp != gp.m.curg { // 注释：如果不是当前运行的G则报错
 		throw("semacquire not on the G stack")
 	}
 
 	// Easy case.
+	// 注释：译：简单的案例。
 	if cansemacquire(addr) {
 		return
 	}
@@ -113,6 +120,8 @@ func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes i
 	//	enqueue itself as a waiter
 	//	sleep
 	//	(waiter descriptor is dequeued by signaler)
+	// 注释：译：更困难的情况：
+	//		递增服务员计数try cansemacquire一次，如果成功，返回将自己作为服务员睡眠入队（服务员描述符由信号员出队）
 	s := acquireSudog()
 	root := semroot(addr)
 	t0 := int64(0)
@@ -153,8 +162,9 @@ func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes i
 	releaseSudog(s)
 }
 
+// 注释：信号量释放
 func semrelease(addr *uint32) {
-	semrelease1(addr, false, 0)
+	semrelease1(addr, false, 0) // 注释：信号量释放
 }
 
 // 注释：信号量释放

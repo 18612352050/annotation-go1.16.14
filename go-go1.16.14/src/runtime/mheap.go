@@ -65,7 +65,7 @@ type mheap struct {
 	lock      mutex     // 注释：互斥锁
 	pages     pageAlloc // 注释：指向spans区域，用于映射span和page的关系(页面分配数据结构) // page allocation data structure
 	sweepgen  uint32    // 注释：GC清理的计数器(GC清理版本)（每次GC清理开始处自增2）// sweep generation, see comment in mspan; written during STW
-	sweepdone uint32    // 注释：清理完成标识1是0否(所有的内存区块（span）都已经被清理了) // all spans are swept
+	sweepdone uint32    // 注释：是否清理完成1是0否(所有的内存区块（span）都已经被清理了)(如果存在没有清理的的数据时是0) // all spans are swept
 	sweepers  uint32    // 注释：活动的处理sweepdone的数量 // number of active sweepone calls
 
 	// allspans is a slice of all mspans ever created. Each mspan
@@ -130,7 +130,9 @@ type mheap struct {
 	// the page marks.
 	//
 	// This is accessed atomically.
-	reclaimIndex uint64
+	// 注释：译：reclainIndex是下一个要回收的页面的allArenas中的页面索引。具体来说，它是指arena(竞技场)allArenas[i/pagesPerArena]的页面（i%pagesPerArena）。
+	//		如果这是>=1<<63，则页面回收器将完成对页面标记的扫描。这是以原子方式访问的。
+	reclaimIndex uint64 // 注释：回收的下标
 	// reclaimCredit is spare credit for extra pages swept. Since
 	// the page reclaimer works in large chunks, it may reclaim
 	// more than requested. Any spare pages released go to this
@@ -138,7 +140,7 @@ type mheap struct {
 	// 注释：译：reclaimCredit是额外页page清理的备用信用。由于页回收器工作在大块中，它可能会回收比请求的更多的内容。释放的任何备用页都将进入此信用池。
 	//
 	// This is accessed atomically.
-	reclaimCredit uintptr // 注释：(可用的页的数量)(回收信用，就是回收的比例)这个值存储是page页数，待清理的页的数量
+	reclaimCredit uintptr // 注释：回收信用，类似受保护缓冲区，如果回收的页数大于这个值时，超出的页数则进行回收，(可用的页的数量)
 
 	// arenas is the heap arena map. It points to the metadata for
 	// the heap for every arena frame of the entire usable virtual
@@ -160,7 +162,13 @@ type mheap struct {
 	// platforms (even 64-bit), arenaL1Bits is 0, making this
 	// effectively a single-level map. In this case, arenas[0]
 	// will never be nil.
-	arenas [1 << arenaL1Bits]*[1 << arenaL2Bits]*heapArena // 注释：arenas[1]*[1<<22]*heapArena ，每个heapArena是64M，所以这里管理了 64M << 22 = 256TB
+	// 注释：译：竞技场是堆竞技场地图。它指向整个可用虚拟地址空间的每个竞技场帧的堆的元数据。使用arenIndex计算此数组中的索引。
+	//		对于没有Go堆支持的地址空间区域，竞技场映射包含nil。修改受mheap_.lock保护。可以在不锁定的情况下执行读取；
+	//		但是，给定的条目可以在未持有锁的任何时候从nil转换为non-nil。（条目从不转换回零。）
+	//		通常，这是由L1映射和可能的许多L2映射组成的两级映射。当有大量的竞技场框架时，这样可以节省空间。
+	//		然而，在许多平台上（甚至是64位），arenaL1Bits是0，这实际上是一个单级映射。在这种情况下，arenas[0]永远不会为零。
+	// 注释：arenas[1]*[1<<22]*heapArena ，每个heapArena是64M，所以这里管理了 64M << 22 = 256TB（Linux AMD64架构）
+	arenas [1 << arenaL1Bits]*[1 << arenaL2Bits]*heapArena // 注释：arenas矩阵数据（指向虚拟地址空间）,所有arena都是从这个矩阵中获取的
 
 	// heapArenaAlloc is pre-reserved space for allocating heapArena
 	// objects. This is only used on 32-bit, where we pre-reserve
@@ -192,7 +200,7 @@ type mheap struct {
 	// beginning of the sweep cycle. This can be read safely by
 	// simply blocking GC (by disabling preemption).
 	// 注释：译：sweepArenas是在清理开始时对allArenas的快照。这可以通过简单地阻塞GC（通过禁用抢占）来安全地读取。
-	sweepArenas []arenaIdx // 注释：清理开始时对allArenas的快照
+	sweepArenas []arenaIdx // 注释：(需要清理的arena)清理开始时对allArenas的快照
 
 	// markArenas is a snapshot of allArenas taken at the beginning
 	// of the mark cycle. Because allArenas is append-only, neither
@@ -238,13 +246,16 @@ var mheap_ mheap
 
 // A heapArena stores metadata for a heap arena. heapArenas are stored
 // outside of the Go heap and accessed via the mheap_.arenas index.
+// 注释：译：heapArena存储堆竞技场的元数据。heapArenas存储在Go堆之外，并通过mheap_arenas索引进行访问。
 //
+// 注释：一个arena的结构体，是对虚拟内存单元
 //go:notinheap
 type heapArena struct {
 	// bitmap stores the pointer/scalar bitmap for the words in
 	// this arena. See mbitmap.go for a description. Use the
 	// heapBits type to access this.
-	bitmap [heapArenaBitmapBytes]byte
+	// 注释：译：位图存储该领域中单词的指针/标量位图。有关描述，请参见mbitmap.go。使用heapBits类型访问此。
+	bitmap [heapArenaBitmapBytes]byte // 注释：arena对应的位图
 
 	// spans maps from virtual address page ID within this arena to *mspan.
 	// For allocated spans, their pages map to the span itself.
@@ -257,7 +268,12 @@ type heapArena struct {
 	// known to contain in-use or stack spans. This means there
 	// must not be a safe-point between establishing that an
 	// address is live and looking it up in the spans array.
-	spans [pagesPerArena]*mspan
+	// 注释：译：跨越从该竞技场内的虚拟地址页ID到*mspan的映射。对于已分配的跨度，其页面将映射到跨度本身。
+	//		对于空闲跨度，只有最低和最高的页面映射到跨度本身。内部页面映射到任意范围。对于从未分配过的页面，跨度条目为零。
+	//		修改受mheap.lock保护。可以在不锁定的情况下执行读取，但只能从已知包含在用或堆栈跨度的索引中执行。
+	//		这意味着在确定地址为活动地址和在span数组中查找地址之间不能存在安全点。
+	// 注释：每个arena存储page的数量是8192， (1<<26)/(1<<13)，64MB/8KB，(也就是说一个arena可以存储8KB个页(共64MB))
+	spans [pagesPerArena]*mspan // 注释：所有的跨度类都是在一个连续的地址空间里，这里表示跨度类的相对地址空间的位置
 
 	// pageInUse is a bitmap that indicates which spans are in
 	// state mSpanInUse. This bitmap is indexed by page number,
@@ -265,7 +281,9 @@ type heapArena struct {
 	// span is used.
 	//
 	// Reads and writes are atomic.
-	pageInUse [pagesPerArena / 8]uint8
+	// 注释：译：pageInUse是一个位图，指示哪些跨度处于mSpanInUse状态。此位图按页码进行索引，但仅使用与每个跨度中的第一页相对应的位。
+	//		读取和写入是原子的。
+	pageInUse [pagesPerArena / 8]uint8 // 注释：已使用的页分组，(每个数组是8页)（LinuxAMD64下最大1024个组，共8192页）
 
 	// pageMarks is a bitmap that indicates which spans have any
 	// marked objects on them. Like pageInUse, only the bit
@@ -277,9 +295,12 @@ type heapArena struct {
 	//
 	// This is used to quickly find whole spans that can be freed.
 	//
-	// TODO(austin): It would be nice if this was uint64 for
+	// TODO(austin): It would be nice if this was uint64 for // 注释：译：如果这是uint64就太好了
 	// faster scanning, but we don't have 64-bit atomic bit
 	// operations.
+	// 注释：译：pageMarks是一个位图，用于指示哪些跨度上有任何标记的对象。与pageInUse一样，只使用与每个跨度中的第一页相对应的位。
+	//		在标记期间以原子方式进行写入。读取是非原子的且无锁的，因为它们只发生在扫描期间（因此从不与写入竞争）。
+	//		这用于快速查找可以释放的整个跨度。更快的扫描，但我们没有64位原子位操作。
 	pageMarks [pagesPerArena / 8]uint8
 
 	// pageSpecials is a bitmap that indicates which spans have
@@ -290,6 +311,8 @@ type heapArena struct {
 	// a span and whenever the last special is removed from a span.
 	// Reads are done atomically to find spans containing specials
 	// during marking.
+	// 注释：译：pageSpecials是一个位图，用于指示哪些跨度具有特殊值（终结器或其他）。与pageInUse一样，只使用与每个跨度中的第一页相对应的位。
+	//		每当向跨度中添加特殊项以及从跨度中删除最后一个特殊项时，都会以原子方式进行写入。在标记过程中，以原子方式进行读取以查找包含特殊值的跨度。
 	pageSpecials [pagesPerArena / 8]uint8
 
 	// checkmarks stores the debug.gccheckmark state. It is only
@@ -485,7 +508,7 @@ type mspan struct {
 	//
 	// 注释：连续数组空间首指针(对应的是一个uint8数组的首指针)(在申请时是个大的连续空间里截取出一段连续的gcBits空间)每8个字节一组，8字节对齐的位图
 	allocBits  *gcBits // 注释：(标记内存占用情况）8字节对齐的位图0未分配1已分配(uint8中每一位控制一个当前span的1块，会把其中64位补码放到缓存allocCache里，每种span的块数量固定【objects】位置：/src/runtime/sizeclasses.go)
-	gcmarkBits *gcBits // 注释：标记内存GC回收情况
+	gcmarkBits *gcBits // 注释：标记内存GC回收情况位图，和allocBits长度一致，1代表黑色（对象使用），0代表白色（空闲对象，待清理对象）
 
 	// sweep generation:
 	// if sweepgen == h->sweepgen - 2, the span needs sweeping
@@ -503,7 +526,7 @@ type mspan struct {
 	// h->sweepgen在每次垃圾回收后会增加2。
 	sweepgen    uint32        // 注释：向 mheap.sweepgen 标记看齐
 	divMul      uint16        // for divide by elemsize - divMagic.mul
-	baseMask    uint16        // if non-0, elemsize is a power of 2, & this will get object allocation base
+	baseMask    uint16        // 注释：译：如果不是0，elemsize是2的幂，这将获得对象分配基数 if non-0, elemsize is a power of 2, & this will get object allocation base
 	allocCount  uint16        // 注释：已分配块的个数(分配的对象数) // number of allocated objects
 	spanclass   spanClass     // 注释：span的ID(也叫做对象ID，对应【class】字段，位置：/src/runtime/sizeclasses.go) // size class and noscan (uint8)
 	state       mSpanStateBox // 注释：span的状态 // mSpanInUse etc; accessed atomically (get/set methods)
@@ -511,7 +534,7 @@ type mspan struct {
 	divShift    uint8         // for divide by elemsize - divMagic.shift
 	divShift2   uint8         // for divide by elemsize - divMagic.shift2
 	elemsize    uintptr       // 注释：(块大小)存储的单个对象大小；(对应class表中的【bytes/obj】字段,地址:/src/runtime/sizeclasses.go) // computed from sizeclass or from npages
-	limit       uintptr       // end of data in span
+	limit       uintptr       // 注释：内存尾部地址(s.base() + sapn的对象大小*页数量) // end of data in span
 	speciallock mutex         // guards specials list
 	specials    *special      // 注释：译：按偏移量排序的特殊记录的链接列表。 // linked list of special records sorted by offset.
 }
@@ -613,8 +636,13 @@ func (sc spanClass) noscan() bool {
 //
 // It is nosplit because it's called by spanOf and several other
 // nosplit functions.
+// 注释：译：arenaIndex将索引返回到包含p元数据的竞技场的mheap_arenas中。该索引结合了L1地图的索引和L2地图的索引，应用作mheap_.renas[ai.l1()][ai.L2()]。
+//		如果p在有效堆地址的范围之外，则l1（）或l2（）将越界。它是nosplit，因为它是由spanOf和其他几个nosplit函数调用的。
 //
-//  注释：arena二维矩阵的一维索引（返回arena的正数倍数）
+// 注释：arena二维矩阵的组合下标（返回arena的正数倍数）
+// 注释：arenaIdx的高位（L1），低位（L2），用来表示：mheap_.arenas[L1][L2]，用一个整型表示二维矩阵的组合下标
+// 注释：低位(L1)是低22位,高位(L2)是arenaIdx>>22，每个架构不同这里是Linux AMD64架构
+// 注释：入参span.base()基地址，返回arena的下标
 //go:nosplit
 func arenaIndex(p uintptr) arenaIdx {
 	return arenaIdx((p - arenaBaseOffset) / heapArenaBytes) // 注释：返回arena的正数倍数
@@ -626,9 +654,10 @@ func arenaBase(i arenaIdx) uintptr {
 	return uintptr(i)*heapArenaBytes + arenaBaseOffset
 }
 
-type arenaIdx uint
+type arenaIdx uint // 注释：arena二维矩阵的组合下标，arenaIdx的高位（L1），低位（L2）用来表示：mheap_.arenas[L1][L2]，用一个整型表示二维矩阵的组合下标
 
-// 注释：l1是高位，i >> 22
+// 注释：l1是高位，返回：arenaIdx >> 22位(Linux AMD64架构)
+// 注释：mheap_.arenas[l1][l2]
 func (i arenaIdx) l1() uint {
 	if arenaL1Bits == 0 {
 		// Let the compiler optimize this away if there's no
@@ -639,7 +668,8 @@ func (i arenaIdx) l1() uint {
 	}
 }
 
-// 注释：l2是低位，i的低22位
+// 注释：l2是低位，返回：arenaIdx的低22位(Linux AMD64架构)
+// 注释：mheap_.arenas[l1][l2]
 func (i arenaIdx) l2() uint {
 	if arenaL1Bits == 0 {
 		return uint(i)
@@ -748,11 +778,12 @@ func spanOfHeap(p uintptr) *mspan {
 
 // pageIndexOf returns the arena, page index, and page mask for pointer p.
 // The caller must ensure p is in the heap.
+// 注释：入参span基地址，返回：arena *heapArena, pageIdx:页的偏移量, pageMask:页的位图标记
 func pageIndexOf(p uintptr) (arena *heapArena, pageIdx uintptr, pageMask uint8) {
-	ai := arenaIndex(p)
-	arena = mheap_.arenas[ai.l1()][ai.l2()]
-	pageIdx = ((p / pageSize) / 8) % uintptr(len(arena.pageInUse))
-	pageMask = byte(1 << ((p / pageSize) % 8))
+	ai := arenaIndex(p)                                            // 注释：获取arena下标
+	arena = mheap_.arenas[ai.l1()][ai.l2()]                        // 注释：获取arena(通过arena下标获取arena)
+	pageIdx = ((p / pageSize) / 8) % uintptr(len(arena.pageInUse)) // 注释：页组下标（页组偏移量）
+	pageMask = byte(1 << ((p / pageSize) % 8))                     // 注释：页每组下的位图标记(后期会atomic.Or8(&arena.pageMarks[pageIdx], pageMask))
 	return
 }
 
@@ -795,11 +826,16 @@ func (h *mheap) init() {
 // h.lock must NOT be held.
 //
 // 注释：回收内存
+// 注释：参数npage需要回收页的数量
 // 注释：步骤
 // 		1.加锁禁止抢占
-// 		2.
-// 		3.
-// 		4.
+// 		2.获取需要清理的arena
+// 		3.遍历页数量，逐个执行回收
+// 			(1).跳过信用页数（受保护的页数量）
+// 			(2).
+// 			(3).
+// 			(4).
+// 注释：【ing】
 func (h *mheap) reclaim(npage uintptr) {
 	// TODO(austin): Half of the time spent freeing spans is in
 	// locking/unlocking the heap (even with low contention). We
@@ -816,29 +852,32 @@ func (h *mheap) reclaim(npage uintptr) {
 	// traceGCSweepStart/Done pair on the P.
 	mp := acquirem() // 注释：获取M加锁禁止抢占
 
-	if trace.enabled {
-		traceGCSweepStart()
+	if trace.enabled { // 注释：如果链路追踪开启
+		traceGCSweepStart() // 注释：启动GC清理是链路追踪
 	}
 
-	arenas := h.sweepArenas // 注释：获取arena
+	arenas := h.sweepArenas // 注释：获取需要回收的arena
 	locked := false
 	for npage > 0 { // 注释：遍历页数量，逐个执行
 		// Pull from accumulated credit first.
 		// 注释：译：先从累积的信贷中提取
-		if credit := atomic.Loaduintptr(&h.reclaimCredit); credit > 0 { // 注释：获取待清理的页数量
-			take := credit
-			if take > npage { // 注释：如果待清理页数量大于当前页总数，则拿走当前页大小的数量
+		// 注释：回收信用，类似受保护缓冲区，如果回收的页数大于这个值时，超出的页数则进行回收，(可用的页的数量)
+		if credit := atomic.Loaduintptr(&h.reclaimCredit); credit > 0 { // 注释：获取信用缓冲区页数，回收页数超出这个时则超出的进行回收
+			take := credit    // 注释：待回收的页数
+			if take > npage { // 注释：如果待回收页数量大于当前页总数，则拿走当前页大小的数量
 				// Take only what we need.
 				take = npage // 注释：重置拿出的页数量
 			}
-			if atomic.Casuintptr(&h.reclaimCredit, credit, credit-take) { // 注释：修改待清理页数数量
-				npage -= take // 注释：跳过拿出的页
+			if atomic.Casuintptr(&h.reclaimCredit, credit, credit-take) { // 注释：修改待回收页数数量
+				npage -= take // 注释：跳过信用页数量(受保护的页数量)，超出的才可以回收
 			}
 			continue
 		}
 
 		// Claim a chunk of work.
-		idx := uintptr(atomic.Xadd64(&h.reclaimIndex, pagesPerReclaimerChunk) - pagesPerReclaimerChunk)
+		// 注释：译：索赔一大块工作。
+		// 注释：(idx是&h.reclaimIndex的旧值)idx = &h.reclaimIndex; &h.reclaimIndex += pagesPerReclaimerChunk
+		idx := uintptr(atomic.Xadd64(&h.reclaimIndex, pagesPerReclaimerChunk) - pagesPerReclaimerChunk) // 注释：获取回收下标后，重置下标，原子操作
 		if idx/pagesPerArena >= uintptr(len(arenas)) {
 			// Page reclaiming is done.
 			atomic.Store64(&h.reclaimIndex, 1<<63)
@@ -965,6 +1004,7 @@ func (s spanAllocType) manual() bool {
 // spanclass indicates the span's size class and scannability.
 //
 // If needzero is true, the memory for the returned span will be zeroed.
+// 注释：译：alloc从GC的堆中分配一个新的npage页面跨度。panclass指示跨度的大小类和可扫描性。如果needzero为true，则返回跨度的内存将为零。
 // 注释：申请内存，npages 页数, spanclass 对象ID（包含是否不需要扫描标识）, needzero 是否0填充，返回新的span
 // 注释：步骤
 // 		1.系统栈执行
@@ -980,16 +1020,16 @@ func (h *mheap) alloc(npages uintptr, spanclass spanClass, needzero bool) *mspan
 		// To prevent excessive heap growth, before allocating n pages
 		// we need to sweep and reclaim at least n pages.
 		if h.sweepdone == 0 { // 注释：如果存在没有清理的的数据
-			h.reclaim(npages) // 注释：回收内存(如果存在没有清理的数据时需要回收内存，重新分配)【ing】
+			h.reclaim(npages) // 注释：回收内存(如果存在没有清理的数据时需要回收内存，重新分配)
 		}
-		s = h.allocSpan(npages, spanAllocHeap, spanclass) // 注释：申请（分配）内存【ing】
+		s = h.allocSpan(npages, spanAllocHeap, spanclass) // 注释：申请（分配）内存
 	})
 
 	if s != nil {
 		if needzero && s.needzero != 0 { // 注释：如果需要0填充，并且span.needzero同时也需要0填充时，执行0填充
 			memclrNoHeapPointers(unsafe.Pointer(s.base()), s.npages<<_PageShift) // 注释：初始化内存，0填充，汇编执行
 		}
-		s.needzero = 0
+		s.needzero = 0 // 注释：需要在分配前归零(零填充)，1是0否
 	}
 	return s
 }
@@ -1195,6 +1235,7 @@ func (h *mheap) freeMSpanLocked(s *mspan) {
 // allocSpan must be called on the system stack both because it acquires
 // the heap lock and because it must block GC transitions.
 //
+// 注释：【ing】
 //go:systemstack
 func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass) (s *mspan) {
 	// Function-global state.

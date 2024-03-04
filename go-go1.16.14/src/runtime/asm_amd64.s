@@ -205,7 +205,7 @@ ok:
     // 注释：将该线程保存在m0
     // 注释：tls: Thread Local Storage
 	// set the per-goroutine and per-mach "registers"
-	get_tls(BX) // 注释：获取TLS数据，里面存储的是G的指针
+	get_tls(BX) // 注释：获取TLS数据，里面存储的是G的指针(宏定义位置：src/runtime/go_tls.h)(宏定义内容：#define	get_tls(r)	MOVQ TLS, r)
 	LEAQ	runtime·g0(SB), CX // 注释：把g0指针放到CX寄存器里
 	MOVQ	CX, g(BX)          // 注释：（把g0放到当前运行的G里）把g0放到TLS（线程运行的G上面）里
 	LEAQ	runtime·m0(SB), AX // 注释：把m0放到AX寄存器里
@@ -281,7 +281,7 @@ TEXT runtime·gosave(SB), NOSPLIT, $0-8
 	TESTQ	BX, BX // 注释：比较；逻辑与（&）运算，TEMP等于0时设置ZF为1；不等于0时设置ZF为0（ZF是条件寄存器）
 	JZ	2(PC)      // 注释：如果相等则跳转2(PC)执行指令
 	CALL	runtime·badctxt(SB) // 注释：调用函数runtime·badctxt
-	get_tls(CX)                 // 注释：获取TLS（*g）
+	get_tls(CX)                 // 注释：获取TLS（*g）(宏定义位置：src/runtime/go_tls.h)(宏定义内容：#define	get_tls(r)	MOVQ TLS, r)
 	MOVQ	g(CX), BX           // 注释：把G指针放到寄存器BX里
 	MOVQ	BX, gobuf_g(AX)     // 注释：(保存G指针)把G指针存储到gobuf.g里
 	RET
@@ -290,11 +290,12 @@ TEXT runtime·gosave(SB), NOSPLIT, $0-8
 // restore state from Gobuf; longjmp
 // 注释：从Gobuf恢复状态并执行
 // 注释：执行gogo函数指令，执行gobuf（之前保存的）中的数据(g.sched类型是gobuf)
+// 注释：执行G协成
 TEXT runtime·gogo(SB), NOSPLIT, $16-8
 	MOVQ	buf+0(FP), BX		// 注释：获取入参的gobuf结构体放到BX寄存器中 // gobuf
 	MOVQ	gobuf_g(BX), DX     // 注释：取出G放到DX寄存器中
 	MOVQ	0(DX), CX		    // 注释：初始化CX寄存器（DX数据放到寄存器CX中）(保证G不为空) // make sure g != nil
-	get_tls(CX) // 注释：取出TLS中的数据放到CX寄存器中，TLS存放了G的指针。定义位置：#define	get_tls(r)	MOVQ TLS, r
+	get_tls(CX) // 注释：取出TLS中的数据放到CX寄存器中，TLS存放了G的指针。(宏定义位置：src/runtime/go_tls.h)(宏定义内容：#define	get_tls(r)	MOVQ TLS, r)
 	MOVQ	DX, g(CX)           // 注释：把G放到TLS的G指针中（getg函数请求的就是TLS中的G指针）
 	MOVQ	gobuf_sp(BX), SP	// 注释：将runtime.goexit函数的PC恢复到SP中; 恢复g.sched.sp到SP寄存器中 // restore SP
 	MOVQ	gobuf_ret(BX), AX   // 注释：恢复g.sched.ret返回值位置到寄存器AX中
@@ -314,12 +315,19 @@ TEXT runtime·gogo(SB), NOSPLIT, $16-8
 // 注释：译：func mcall（fn func（*g））切换到m->g0的堆栈，调用fn（g）。Fn决不能再回来。它应该gogo（&g->sched）继续运行g。
 //
 // 注释：执行 runtime.mcall 函数的汇编函数
+// 注释：每个M下都会保存一个g0，是自己独立的栈空间(系统线程栈空间)。
+// 注释：步骤：
+//      1.获取业务G（tls里的G）
+//      2.保存现场
+//      3.切换g0
+//      4.把业务G压入栈中，作为fn的入参
+//      5.执行fn，用g0执行fn，(业务G是入参),永不返回（需要执行下一次系统调度或休息）
 TEXT runtime·mcall(SB), NOSPLIT, $0-8
 	MOVQ	fn+0(FP), DI                    // 注释：(参数fn地址,闭包函数指令地址)第一个参数是闭包函数(存储的时候闭包函数指令的指针)
 
     // 注释：保存现场
 	get_tls(CX)                             // 注释：获取TLS的G地址，放到CX寄存器里(里第一个地址就是G地址)
-	MOVQ	g(CX), AX	                    // 注释：把G地址放到AX里 // save state in g->sched
+	MOVQ	g(CX), AX	                    // 注释：把业务G指针放到AX里 // save state in g->sched
 	MOVQ	0(SP), BX	                    // 注释：(要执行的PC)硬件寄存器栈指针(栈顶,低地址)(存储当前PC值) // caller's PC
 	MOVQ	BX, (g_sched+gobuf_pc)(AX)      // 注释：保存栈顶，低地址位置(硬件寄存器SP)
 	LEAQ	fn+0(FP), BX	                // 注释：(参数fn地址)第1个参数(闭包函数) // caller's SP
@@ -337,14 +345,14 @@ TEXT runtime·mcall(SB), NOSPLIT, $0-8
 	JMP	AX                                  // 注释：如果相等则报错
 	MOVQ	SI, g(CX)	                    // 注释：切换到G0 // g = m->g0
 	MOVQ	(g_sched+gobuf_sp)(SI), SP	    // 注释：把G0里的SP拿出来 // sp = m->g0->sched.sp
-	PUSHQ	AX                              // 注释：(入栈)把业务G压入到栈里(AX是业务G)
+	PUSHQ	AX                              // 注释：(入栈)把业务G压入到栈里(AX是业务G指针)(这里把业务G指针作为fn的参数)
 	MOVQ	DI, DX                          // 注释：把参数fn地址放到DX里
 	MOVQ	0(DI), DI                       // 注释：(拿出fn函数指令)闭包函数指令
-	CALL	DI                              // 注释：执行闭包函数(执行fn函数指令)
-	POPQ	AX                              // 注释：(出栈)从栈中踢出业务G
-	MOVQ	$runtime·badmcall2(SB), AX
-	JMP	AX
-	RET
+	CALL	DI                              // 注释：执行fn闭包函数(永不返回，如果返回了则报错了)
+	POPQ	AX                              // 注释：(出栈)从栈中踢出业务G指针
+	MOVQ	$runtime·badmcall2(SB), AX      // 注释：报错信息放到AX里(报错了)
+	JMP	AX                                  // 注释：跳转到报错(报错了)
+	RET                                     // 注释：程序退出
 
 // systemstack_switch is a dummy routine that systemstack leaves at the bottom
 // of the G stack. We need to distinguish the routine that
@@ -355,15 +363,16 @@ TEXT runtime·systemstack_switch(SB), NOSPLIT, $0-0
 	RET
 
 // func systemstack(fn func())
-// 注释：切换到系统堆栈执行闭包函数（系统堆栈指的就是g0，有独立的8M栈空间，负责调度G）
+// 注释：切换到系统堆栈执行闭包函数（系统堆栈指的就是g0，有独立的栈空间，就是线程栈空间，负责调度G）
 // 注释：步骤：
 //      1.获取M下的G0（每个M下都有自己的G0）
 //      2.保存现场（把业务G的PC、SP、G、BP保存起来）
 //      3.切换G0（把G0替换业务G（TLS））
-//      4.执行闭包函数（此时是用G0执行的）
-//      5.切换回业务G
+//      4.执行fn闭包函数（此时是用G0执行的）
+//      5.切换回业务G(把业务G放到TLS中)
 //      6.恢复SP栈基指针（把业务的sp放回来）(业务G的参数赋值到栈的SP上)(SP存放函数参数访问头位置（基指针，栈低）)
 //      7.清楚备份的SP
+//      8.程序退出后继续执行后面逻辑时取出的g(get_tls)就是业务G，也就是说会继续执行业务G的内容
 TEXT runtime·systemstack(SB), NOSPLIT, $0-8
 	MOVQ	fn+0(FP), DI	                    // 注释：获取一个入参（闭包函数的地址） // DI = fn
 	get_tls(CX)                                 // 注释：获取m的tls数据（线程的本地私有数据）(第一个元素就是存放G的地址)(程序当前运行的g会到这里找)
@@ -609,13 +618,13 @@ CALLFN(·call268435456, 268435456)
 CALLFN(·call536870912, 536870912)
 CALLFN(·call1073741824, 1073741824)
 
-// 注释：循环执行PAUSE系统指令，循环次数是第一个参数，该指令只会占用 CPU 并消耗 CPU 时间
+// 注释：循环执行PAUSE系统指令，循环次数是第一个参数，CPU暂停，此时不会被CPU切片抢占(该指令只会占用CPU并消耗CPU时间)
 TEXT runtime·procyield(SB),NOSPLIT,$0-0
 	MOVL	cycles+0(FP), AX
 again:
-	PAUSE
-	SUBL	$1, AX
-	JNZ	again
+	PAUSE           // 注释：CPU暂停，此时不会被CPU切片抢占，（占用CPU并消耗CPU的时间）
+	SUBL	$1, AX  // 注释：AX = AX - 1
+	JNZ	again       // 注释：不等于时跳转again标签
 	RET
 
 
@@ -1405,10 +1414,12 @@ TEXT _cgo_topofstack(SB),NOSPLIT,$0
 // so as to make it identifiable to traceback (this
 // function it used as a sentinel; traceback wants to
 // see the func PC, not a wrapper PC).
+// 注释：译：goroutine上运行的最上面的函数返回goexit+PCQuantum。定义为ABIInteral，以便使其可被回溯识别（该函数用作哨兵；回溯希望看到函数PC，而不是包装PC）。
 // 注释：G调用完成后调用的退出函数
+// 注释：协成退出
 TEXT runtime·goexit<ABIInternal>(SB),NOSPLIT,$0-0
 	BYTE	$0x90	// NOP
-	CALL	runtime·goexit1(SB)	// does not return
+	CALL	runtime·goexit1(SB)	// 注释：永远不返回，因为执行了下一次调度 // does not return
 	// traceback from goexit1 must hit code range of goexit
 	BYTE	$0x90	// NOP
 

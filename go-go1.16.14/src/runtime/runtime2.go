@@ -217,11 +217,12 @@ type iface struct {
 // 注释：空接口的接头体(empyt interface)
 type eface struct {
 	_type *_type
-	data  unsafe.Pointer
+	data  unsafe.Pointer // 注释：*(*uintptr)(eface.data)可以获取PC值，使用：*(*uintptr)(efaceOf(&f).data)
 }
 
+// 注释：获取空接口地址
 func efaceOf(ep *interface{}) *eface {
-	return (*eface)(unsafe.Pointer(ep))
+	return (*eface)(unsafe.Pointer(ep)) // 注释：获取空接口地址
 }
 
 // The guintptr, muintptr, and puintptr are all used to bypass write barriers.
@@ -329,7 +330,6 @@ func setMNoWB(mp **m, new *m) {
 // 注释：协成执行现场数据(调度信息)，G状态(g.atomicstatus)变更时，都需要保存当前G的上下文和寄存器等信息。保存协成切换中切走时的寄存器等数据
 type gobuf struct {
 	// The offsets of sp, pc, and g are known to (hard-coded in) libmach.
-	// 注释：寄存器 sp, pc 和 g 的偏移量，硬编码在 libmach
 	// ctxt is unusual with respect to GC: it may be a
 	// heap-allocated funcval, so GC needs to track it, but it
 	// needs to be set and cleared from assembly, where it's
@@ -340,6 +340,9 @@ type gobuf struct {
 	// and restores it doesn't need write barriers. It's still
 	// typed as a pointer so that any other writes from Go get
 	// write barriers.
+	// 注释：译：sp、pc和g的偏移量是libmach已知的（硬编码）。ctxt对于GC来说是不寻常的：它可能是一个堆分配的函数，所以GC需要跟踪它，但它需要设置并从程序集中清除，在程序集中很难有写障碍。
+	//		然而，ctxt实际上是一个保存的实时寄存器，我们只在真实寄存器和gobuf之间交换它。因此，我们在堆栈扫描期间将其视为根，这意味着保存和恢复它的程序集不需要写障碍。它仍然被键入为指针，
+	//		因此Go中的任何其他写入都会遇到写入障碍。
 	// 注释：调度器在将G由一种状态变更为另一种状态时，需要将上下文信息保存到这个gobuf结构体，当再次运行G的时候，再从这个结构体中读取出来，它主要用来暂存上下文信息。
 	// 注释：其中的栈指针 sp 和程序计数器 pc 会用来存储或者恢复寄存器中的值，设置即将执行的代码
 	sp   uintptr        // 注释：sp栈指针位置(保存CPU的rsp寄存器的值)
@@ -366,10 +369,14 @@ type gobuf struct {
 // 注释：sudog是从一个特殊的池中分配的。使用acquireSudog和releaseSudog来分配和释放它们。
 //
 // 注释：等待(阻塞)的G（通常是全局G链表或当前P中等待的G列表中的成员），所有要执行的G都是以这个结构体的形式存在
+// 注释：有两个地方在使用
+//		1.管道chan：读取阻塞sudog，发送阻塞sudog，在chan里是两个链表结构
+//		2.信号，阻塞sudog，在信号里是通过一个全局二叉树查找（大堆排序），节点是个sudog链表
 type sudog struct {
 	// The following fields are protected by the hchan.lock of the
 	// channel this sudog is blocking on. shrinkstack depends on
 	// this for sudogs involved in channel ops.
+	// 注释：译：以下字段受此sudog阻塞的通道的hchan.lock保护。对于通道操作中涉及的sudog，shrinkstack取决于此。
 
 	g *g // 注释：需要休眠的G
 
@@ -381,6 +388,7 @@ type sudog struct {
 	// For channels, waitlink is only accessed by g.
 	// For semaphores, all fields (including the ones above)
 	// are only accessed when holding a semaRoot lock.
+	// 注释：译：以下字段永远不会同时访问。对于通道，waitlink只能由g访问。对于信号量，所有字段（包括上面的字段）只有在持有semaRoot锁时才能访问。
 
 	acquiretime int64 // 注释：初始胡的时间
 	releasetime int64 // 注释：释放时的时间,-1代表send是再设置时间，如果大于0，会把cputicks()设置进来（CPU时钟周期计数器）。启动阻塞事件，blockevent阻塞监听的时间是当前值减去当时cputicks()值
@@ -388,12 +396,14 @@ type sudog struct {
 
 	// isSelect indicates g is participating in a select, so
 	// g.selectDone must be CAS'd to win the wake-up race.
+	// 注释：译：isSelect表示g正在参与选择，因此g.selectDone必须是CAS才能赢得唤醒比赛。
 	isSelect bool // 注释：（是否是select导致的阻塞）是否参与select
 
 	// success indicates whether communication over channel c
 	// succeeded. It is true if the goroutine was awoken because a
 	// value was delivered over channel c, and false if awoken
 	// because c was closed.
+	// 注释：译：success表示通过信道c的通信是否成功。如果goroutine是因为通过通道c传递值而被唤醒的，则为true；如果是因为c关闭而被唤醒，则为false。
 	// 注释：信道c上的通信是否成功。如果goroutine因为值通过通道c传递而被唤醒，则为true，如果因为c被关闭而被唤醒则为false
 	success bool // 注释：是否因通道唤醒(管道非关闭时唤醒为true，关闭时唤醒为false)
 
@@ -498,9 +508,9 @@ type g struct {
 	sigcode0       uintptr
 	sigcode1       uintptr
 	sigpc          uintptr
-	gopc           uintptr         // 注释：创建当前G的PC(调用者的PC(rip)) 例如：A调用B然后执行go指令，此时gopc是A的PC值 // pc of go statement that created this goroutine
-	ancestors      *[]ancestorInfo // 注释：创建此g的祖先信息g仅在debug.traceback祖先时使用 // ancestor information goroutine(s) that created this goroutine (only used if debug.tracebackancestors)
-	startpc        uintptr         // 注释：任务函数(go func(){}中指令对应的pc值) // pc of goroutine function
+	gopc           uintptr         // 注释：(go关键词的父级PC)创建当前G的PC(调用者的PC(rip)) 例如：A调用B然后执行go指令，此时gopc是A的PC值 // pc of go statement that created this goroutine
+	ancestors      *[]ancestorInfo // 注释：(调用链信息,用于debug追溯时使用)创建此g的祖先信息g仅在debug.traceback祖先时使用 // ancestor information goroutine(s) that created this goroutine (only used if debug.tracebackancestors)
+	startpc        uintptr         // 注释：任务函数(go fn()中fn指令对应的pc值) // pc of goroutine function
 	racectx        uintptr
 	waiting        *sudog         // 注释：等待的sudog链表头指针  // sudog structures this g is waiting on (that have a valid elem ptr); in lock order
 	cgoCtxt        []uintptr      // cgo traceback context
@@ -530,7 +540,7 @@ type m struct {
 	divmod  uint32 // div/mod denominator for arm - known to liblink
 
 	// Fields not known to debuggers.
-	procid     uint64       // 注释：p的ID,用来调试时使用,一般是协成ID，初始化m时是线程ID // for debuggers, but offset not hard-coded
+	procid     uint64       // 注释：进程ID,用来调试时使用,一般是协成ID，初始化m时是线程ID // for debuggers, but offset not hard-coded
 	gsignal    *g           // 注释：M中正在处理信号的G(信号处理) // signal-handling g
 	goSigStack gsignalStack // Go-allocated signal handling stack
 	sigmask    sigset       // storage for saved signal mask
@@ -546,7 +556,7 @@ type m struct {
 	id            int64    // 注释：M的ID
 	mallocing     int32    // 注释：正在申请内存标识(0否1是)，当申请内存的开头会检查这个字段，如果已经在申请了，则报错，
 	throwing      int32    // 注释：-1不要转储完整的堆栈,大于0时:存储完整的堆栈（用于栈追踪使用）
-	preemptoff    string   // if != "", keep curg running on this m
+	preemptoff    string   // 注释：如果有值则保持curg在这个m上运行 // if != "", keep curg running on this m
 	locks         int32    // 注释：给M加锁;(禁用抢占)大于0时说明正在g正在被使用，系统调用后置函数的时候有使用（获取时++，释放是--）
 	dying         int32
 	profilehz     int32
@@ -636,8 +646,11 @@ type p struct {
 	deferpoolbuf [5][32]*_defer
 
 	// Cache of goroutine ids, amortizes accesses to runtime·sched.goidgen.
-	goidcache    uint64
-	goidcacheend uint64
+	// 注释：译：goroutine id的缓存，摊销访问 runtime.sched.goidgen
+	// 注释：下面两个字段goidcache、goidcacheend表示新G的ID池，新G的 g.goid = goidcache,然后 goidcache++，直到goidcache == goidcacheend时表示缓存已经用完。
+	// 注释：如果缓存用完，则会到全局 runtime.sched 结构体中 goidgen 字段拿取16个ID（atomic.Xadd64(&sched.goidgen, _GoidCacheBatch)）（原子操作全局变量）
+	goidcache    uint64 // 注释：G的ID缓存最小值，设置新申请的G的ID为该字段值，设置完成后该字段自增，直到等于goidcacheend时缓存的ID用完，需到全局 runtime.sched 中 goidgen 字段拿取16个
+	goidcacheend uint64 // 注释：G的ID缓存的最大值 g.goid 申请范围[goidcache, goidcacheend) 不包括goidcacheend
 
 	// Queue of runnable goroutines. Accessed without lock.
 	// 注释：本地g运行队列(用数组实现队列)
@@ -660,7 +673,7 @@ type p struct {
 	// 注释：如果n>=64则会把本地P空G拿出一半（32个）放到全局空闲队列里,执行方法是：func gfput(_p_ *p, gp *g) {}
 	// 注释：如果n==0则会到全局空闲列表里拿回32个,执行方法是：func gfget(_p_ *p) *g {}
 	gFree struct { // 注释：空G队列
-		gList       // 注释：空G的头指针
+		gList       // 注释：空G的头指针(gList.head 是G指针,是G列表的头部G指针)
 		n     int32 // 注释：空G的个数，最大是64程序控制。
 	}
 
@@ -723,7 +736,8 @@ type p struct {
 	// gcw is this P's GC work buffer cache. The work buffer is
 	// filled by write barriers, drained by mutator assists, and
 	// disposed on certain GC state transitions.
-	gcw gcWork
+	// 注释：译：gcw是这个P的GC工作缓冲区缓存。工作缓冲区由写屏障填充，由赋值器辅助耗尽，并在某些GC状态转换时进行处理。
+	gcw gcWork // 注释：(P处理器上GC写屏障缓冲区)每个P处理的GC写屏障缓冲区，之后会统一刷到GC里
 
 	// wbBuf is this P's GC write barrier buffer.
 	//
@@ -769,7 +783,7 @@ type p struct {
 // 注释：记录调度器的状态和g的全局运行队列：
 type schedt struct {
 	// accessed atomically. keep at top to ensure alignment on 32-bit systems.
-	goidgen   uint64
+	goidgen   uint64 // 注释：全局G协成ID的分配计数器（小于等于这个值表示已经分配给G作为ID，或者已经把ID给了P准备给G分配）(每次给P分配16个ID)(第一个协成main的ID是1，因为当时这个字段是0)
 	lastpoll  uint64 // time of last network poll, 0 if currently polling
 	pollUntil uint64 // time to which current poll is sleeping
 
@@ -781,12 +795,12 @@ type schedt struct {
 	midle        muintptr // idle m's waiting for work               // 注释：由空闲的工作线程m组成链表(midle和m.schedlink组成的链表)(midle值是m,m中的m.schedlink连接下一个midle)
 	nmidle       int32    // number of idle m's waiting for work     // 注释：空闲的工作线程m的数量
 	nmidlelocked int32    // number of locked m's waiting for work
-	mnext        int64    // number of m's that have been created and next M ID // 注释：下一个新m的主键ID值(用来创建新m时使用)
+	mnext        int64    // 注释：下一个新m的主键ID值(用来创建新m时使用) // number of m's that have been created and next M ID
 	maxmcount    int32    // maximum number of m's allowed (or die)  // 注释：最多只能创建maxmcount个工作线程m
-	nmsys        int32    // number of system m's not counted for deadlock
-	nmfreed      int64    // cumulative number of freed m's
+	nmsys        int32    // 注释：译：不计入死锁的系统m数 // number of system m's not counted for deadlock
+	nmfreed      int64    // 注释：释放的m的累积数 // cumulative number of freed m's
 
-	ngsys uint32 // number of system goroutines; updated atomically
+	ngsys uint32 // 注释：译：系统goroutine的数量；以原子方式更新 // number of system goroutines; updated atomically
 
 	pidle      puintptr // idle p's // 注释：由空闲的p结构体对象组成的链表(这里指向的链表的头部)
 	npidle     uint32   // 注释：空闲的p结构体对象的数量
@@ -894,7 +908,7 @@ type _func struct {
 	pcln      uint32
 	npcdata   uint32
 	cuOffset  uint32  // runtime.cutab offset of this function's CU
-	funcID    funcID  // set for certain special runtime functions
+	funcID    funcID  // 注释：方法ID // set for certain special runtime functions
 	_         [2]byte // pad
 	nfuncdata uint8   // must be last
 }

@@ -259,7 +259,8 @@ const (
 	logHeapArenaBytes = (6+20)*(_64bit*(1-sys.GoosWindows)*(1-sys.GoarchWasm)) + (2+20)*(_64bit*sys.GoosWindows) + (2+20)*(1-_64bit) + (2+20)*sys.GoarchWasm
 
 	// heapArenaBitmapBytes is the size of each heap arena's bitmap.
-	heapArenaBitmapBytes = heapArenaBytes / (sys.PtrSize * 8 / 2)
+	// 注释：译：heapArenaBitmapBytes是每个堆竞技场的位图的大小。
+	heapArenaBitmapBytes = heapArenaBytes / (sys.PtrSize * 8 / 2) // 注释：每个arena的位图大小
 
 	pagesPerArena = heapArenaBytes / pageSize // 注释：每个arena存储page的数量是8192， (1<<26)/(1<<13)，64MB/8KB，(也就是说一个arena可以存储8KB个页(共64MB))
 
@@ -909,9 +910,9 @@ func (c *mcache) nextFree(spc spanClass) (v gclinkptr, s *mspan, shouldhelpgc bo
 			println("runtime: s.allocCount=", s.allocCount, "s.nelems=", s.nelems)
 			throw("s.allocCount != s.nelems && freeIndex == s.nelems")
 		}
-		c.refill(spc)       // 注释：从新填装空span到mcache里，确保mcache缓存中只要有一个可以使用的span里的空闲块
+		c.refill(spc)       // 注释：(从中心缓存或堆中拿空间)从新填装空span到mcache里，确保mcache缓存中只要有一个可以使用的span里的空闲块
 		shouldhelpgc = true // 注释：是否申请新的span
-		s = c.alloc[spc]    //	注释：新span地址
+		s = c.alloc[spc]    // 注释：新span地址
 
 		freeIndex = s.nextFreeIndex() // 注释：重新获取空块下标
 	}
@@ -936,14 +937,16 @@ func (c *mcache) nextFree(spc spanClass) (v gclinkptr, s *mspan, shouldhelpgc bo
 // 注释：（用户分配内存起始函数）分配对象（处理分配对象和GC一些标记工作）
 // 注释：返回申请后的内存首地址
 // 注释：步骤：
-// 		1.微对象分配
+//		1.获取线程锁
+// 		2.微对象分配
 // 			a.微对象ID是2，分配的单个块对象大小为16字节（两个指针大小），共1024个块（注释位置参考：src/runtime/sizeclasses.go）
 // 			b.16byte分为2、4、8三个等级(会根据这三个等级进行内存对齐)，根据要分配对象大小分配存储在不同等级上
 //			c.如果当前块无法容纳时，会使用下一个块，并根据这两个块的使用情况，决定下次使用剩余空间最大的块。
-// 		2.小对象分配
-// 		3.大对象分配
-// 		4.
-// 		5.
+// 		3.小对象分配
+// 		4.大对象分配
+// 		5.GC的辅助工作
+// 		6.释放线程锁
+//		7.返回对象首地址
 func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	if gcphase == _GCmarktermination { // 注释：如果GC标记为_GCmarktermination则报错
 		throw("mallocgc called with gcphase == _GCmarktermination")
@@ -1034,14 +1037,12 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 		// 注释：微型分配器。
 		if noscan && size < maxTinySize { // 注释：如果小于16KB表示是微小对象分配
 			// Tiny allocator.
-			// 注释：译：微型分配器。
 			//
 			// Tiny allocator combines several tiny allocation requests
 			// into a single memory block. The resulting memory block
 			// is freed when all subobjects are unreachable. The subobjects
 			// must be noscan (don't have pointers), this ensures that
 			// the amount of potentially wasted memory is bounded.
-			// 注释：译：微小分配器将几个微小的分配请求组合到一个内存块中。当所有子对象都无法访问时，将释放生成的内存块。子对象必须是noscan（没有指针），这样可以确保潜在浪费的内存量是有限的。
 			//
 			// Size of the memory block used for combining (maxTinySize) is tunable.
 			// Current setting is 16 bytes, which relates to 2x worst case memory
@@ -1051,24 +1052,26 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 			// 32 bytes provides more opportunities for combining,
 			// but can lead to 4x worst case wastage.
 			// The best case winning is 8x regardless of block size.
-			// 注释：译：用于组合的内存块的大小（maxTinySize）是可调的。当前设置为16字节，这与2倍最坏情况下的内存浪费有关（当除一个子对象外的所有子对象都无法访问时）。
-			// 		8个字节将导致完全没有浪费，但提供较少的组合机会。32字节提供了更多的组合机会，但在最坏情况下可能导致4倍的浪费。无论区块大小，最好的获胜方式是8倍。
 			//
 			// Objects obtained from tiny allocator must not be freed explicitly.
 			// So when an object will be freed explicitly, we ensure that
 			// its size >= maxTinySize.
-			// 注释：译：不能显式释放从微小分配器获得的对象。因此，当一个对象将被显式释放时，我们确保其大小>=maxTinySize。
 			//
 			// SetFinalizer has a special case for objects potentially coming
 			// from tiny allocator, it such case it allows to set finalizers
 			// for an inner byte of a memory block.
-			// 注释：译：SetFinalizer对于可能来自微小分配器的对象有一个特殊情况，它允许为内存块的内部字节设置终结器。
 			//
 			// The main targets of tiny allocator are small strings and
 			// standalone escaping variables. On a json benchmark
 			// the allocator reduces number of allocations by ~12% and
 			// reduces heap size by ~20%.
-			// 注释：译：微小分配器的主要目标是小字符串和独立的转义变量。在json基准测试中，分配器将分配数量减少了约12%，并将堆大小减少了约20%。
+			// 注释：译：微型分配器。
+			// 		微小分配器将几个微小的分配请求组合到一个内存块中。当所有子对象都无法访问时，将释放生成的内存块。子对象必须是noscan（没有指针），这样可以确保潜在浪费的内存量是有限的。
+			// 		用于组合的内存块的大小（maxTinySize）是可调的。当前设置为16字节，这与2倍最坏情况下的内存浪费有关（当除一个子对象外的所有子对象都无法访问时）。
+			// 		8个字节将导致完全没有浪费，但提供较少的组合机会。32字节提供了更多的组合机会，但在最坏情况下可能导致4倍的浪费。无论区块大小，最好的获胜方式是8倍。
+			// 		不能显式释放从微小分配器获得的对象。因此，当一个对象将被显式释放时，我们确保其大小>=maxTinySize。
+			// 		SetFinalizer对于可能来自微小分配器的对象有一个特殊情况，它允许为内存块的内部字节设置终结器。
+			// 		微小分配器的主要目标是小字符串和独立的转义变量。在json基准测试中，分配器将分配数量减少了约12%，并将堆大小减少了约20%。
 			off := c.tinyoffset
 			// Align tiny pointer for required (conservative) alignment.
 			if size&7 == 0 {
@@ -1155,7 +1158,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 		// 注释：译：如果分配一个defer+arg块，现在我们已经选择了一个足够大的malloc大小来容纳所有内容，那么将“请求”的大小缩小到只有defer标头，
 		//		这样GC位图就会将arg块记录为完全不包含任何内容（就好像它是由大小舍入引起的malloc块末尾的未使用空间一样）。延迟参数区域作为扫描堆栈的一部分进行扫描。
 		if typ == deferType { // 注释：如果是延迟调用函数则执行
-			dataSize = unsafe.Sizeof(_defer{}) // 注释：从新定义数据大小为延迟调用函数类型结构体大小
+			dataSize = unsafe.Sizeof(_defer{}) // 注释：(延迟函数大小)从新定义数据大小为延迟调用函数类型结构体大小
 		}
 		heapBitsSetType(uintptr(x), size, dataSize, typ)
 		if dataSize > typ.size {
@@ -1178,13 +1181,16 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	// collector. Otherwise, on weakly ordered machines,
 	// the garbage collector could follow a pointer to x,
 	// but see uninitialized memory or stale heap bits.
+	// 注释：译：确保在调用方可以使x对垃圾收集器可见之前，上面将x初始化为类型安全内存并设置堆位的存储发生。
+	//		否则，在弱排序的机器上，垃圾收集器可能会跟随指向x的指针，但会看到未初始化的内存或过时的堆位。
 	publicationBarrier()
 
 	// Allocate black during GC.
 	// All slots hold nil so no scanning is needed.
 	// This may be racing with GC so do it atomically if there can be
 	// a race marking the bit.
-	if gcphase != _GCoff {
+	// 注释：译：GC期间分配黑色。所有插槽保持为零，因此不需要扫描。这可能是在与GC竞争，所以如果可能存在标记位的竞争，则以原子方式进行。
+	if gcphase != _GCoff { // 注释：如果运行了GC
 		gcmarknewobject(span, uintptr(x), size, scanSize)
 	}
 
@@ -1197,7 +1203,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	}
 
 	mp.mallocing = 0
-	releasem(mp)
+	releasem(mp) // 注释：释放线程锁
 
 	if debug.malloc {
 		if debug.allocfreetrace != 0 {
@@ -1226,9 +1232,9 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 		assistG.gcAssistBytes -= int64(size - dataSize)
 	}
 
-	if shouldhelpgc {
-		if t := (gcTrigger{kind: gcTriggerHeap}); t.test() {
-			gcStart(t)
+	if shouldhelpgc { // 注释：是否有新的span申请
+		if t := (gcTrigger{kind: gcTriggerHeap}); t.test() { // 注释：判断是否需要起开GC
+			gcStart(t) // 注释：开启GC
 		}
 	}
 

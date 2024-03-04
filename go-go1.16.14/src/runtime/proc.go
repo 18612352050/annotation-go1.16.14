@@ -103,7 +103,7 @@ var main_init_done chan bool
 func main_main()
 
 // mainStarted indicates that the main M has started.
-var mainStarted bool
+var mainStarted bool // 注释：mainStarted表示主M已启动。
 
 // runtimeInitTime is the nanotime() at which the runtime started.
 var runtimeInitTime int64
@@ -360,8 +360,17 @@ func goready(gp *g, traceskip int) {
 	})
 }
 
-// 注释：获取一个空闲的G
+// 注释：获取空闲带阻塞G
 // 注释：如果当前P中空闲G列表存在，并且全局空闲G有数据时。(去全局空闲G链表中拿出P中的空闲G总数的一半)
+// 注释：步骤：
+// 		1.线程加锁，并获取P指针
+// 		2.如果P里空闲待阻塞栈里没有sudog时(栈是由数组实现的)
+//			a.获取全局锁
+//			b.填充本地队列容量的一半，从全局链表中拿取
+//			c.如果本地队列还没有sudog，则实例化1个新的sudog放到本地队列中
+// 		3.(出栈)从P空闲待阻塞栈里出栈
+// 		4.释放线程锁
+// 		5.返回空闲待阻塞的sudog
 //go:nosplit
 func acquireSudog() *sudog {
 	// Delicate dance: the semaphore implementation calls
@@ -372,6 +381,8 @@ func acquireSudog() *sudog {
 	// Break the cycle by doing acquirem/releasem around new(sudog).
 	// The acquirem/releasem increments m.locks during new(sudog),
 	// which keeps the garbage collector from being invoked.
+	// 注释：译：精致的舞蹈：信号量实现调用acquireSudog，acquireSudog调用new（sudog），new调用malloc，malloc可以调用垃圾收集器，垃圾收集器调用stopTheWorld中的信号量实现。
+	//		通过围绕新事物（sudog）进行获取/发布来打破循环。acquirem/releasem在new（sudog）过程中增加m.locks，从而防止垃圾收集器被调用。
 	mp := acquirem() // 注释：获得当前的M（当前G对应的M）对象
 	pp := mp.p.ptr() // 注释：当前M对应的P指针
 
@@ -467,9 +478,13 @@ func releaseSudog(s *sudog) {
 // the same function in the address space). To be safe, don't use the
 // results of this function in any == expression. It is only safe to
 // use the result as an address at which to start executing code.
+// 注释：译：funcPC返回函数f的入口PC。它假设f是一个func值。否则行为是未定义的。
+//		小心：在带有插件的程序中，funcPC可以为同一函数返回不同的值（因为在地址空间中实际上有同一函数的多个副本）。
+//		为了安全起见，不要在任何==表达式中使用此函数的结果。只有将结果用作开始执行代码的地址才是安全的。
+// 注释：获取方法的PC值
 //go:nosplit
 func funcPC(f interface{}) uintptr {
-	return *(*uintptr)(efaceOf(&f).data)
+	return *(*uintptr)(efaceOf(&f).data) // 注释：获取方法的PC值
 }
 
 // called from assembly
@@ -520,6 +535,8 @@ var (
 	// Access via the slice is protected by allglock or stop-the-world.
 	// Readers that cannot take the lock may (carefully!) use the atomic
 	// variables below.
+	// 注释：译：allgs包含所有曾经创造过的g（包括死亡的g），因此永远不会收缩。
+	//		通过切片访问受到allglock或stop the world的保护。无法获取锁的读者可以（小心！）使用下面的原子变量。
 	allglock mutex // 注释：全局G的切片的锁
 	allgs    []*g  // 注释：保存所有的g的切片
 
@@ -535,6 +552,10 @@ var (
 	// allgptr copies should always be stored as a concrete type or
 	// unsafe.Pointer, not uintptr, to ensure that GC can still reach it
 	// even if it points to a stale array.
+	// 注释：译：allglen和allgptr是分别包含len（allg）和&allg[0]的原子变量。正确的订购取决于完全订购的装载和存储。写入受allglock保护。
+	//		allgptr在allglen之前更新。读者应在allgptr之前阅读allglen，以确保allglen始终<=len（allgptr）。比赛期间附加的新Gs可能会错过。
+	//		为了对所有Gs有一个一致的看法，必须持有allglock。
+	//		所有gptr副本应始终存储为具体类型或不安全类型。指针，而不是uintptr，以确保即使GC指向过时的数组，它仍然可以访问它。
 	allglen uintptr // 注释：全局G切片个数
 	allgptr **g     // 注释：全局G切片第一个元素的指针
 )
@@ -569,6 +590,7 @@ func atomicAllGIndex(ptr **g, i uintptr) *g {
 const (
 	// Number of goroutine ids to grab from sched.goidgen to local per-P cache at once.
 	// 16 seems to provide enough amortization, but other than that it's mostly arbitrary number.
+	// 注释：译：一次从sched.goidgen抓取到本地per-P缓存的goroutine ID数。16似乎提供了足够的摊销，但除此之外，它大多是任意数字。
 	_GoidCacheBatch = 16
 )
 
@@ -930,7 +952,7 @@ func castogscanstatus(gp *g, oldval, newval uint32) bool {
 // casgstatus will loop if the g->atomicstatus is in a Gscan status until the routine that
 // put it in the Gscan state is finished.
 // 注释：if gp.atomicstatus == oldval { gp = newval}
-// 注释：修改状态，把状态为oldval的更改为newval
+// 注释：(原子操作)修改G的状态，把状态为oldval的更改为newval
 //go:nosplit
 func casgstatus(gp *g, oldval, newval uint32) {
 	if (oldval&_Gscan != 0) || (newval&_Gscan != 0) || oldval == newval {
@@ -949,7 +971,9 @@ func casgstatus(gp *g, oldval, newval uint32) {
 
 	// loop if gp->atomicstatus is in a scan state giving
 	// GC time to finish and change the state to oldval.
-	for i := 0; !atomic.Cas(&gp.atomicstatus, oldval, newval); i++ { // 注释：修改状态，把状态oldval修改成newval
+	for i := 0; !atomic.Cas(&gp.atomicstatus, oldval, newval); i++ { // 注释：(原子操作)修改G的状态，把状态oldval修改成newval
+		// 注释：修改状态失败，补救逻辑
+		// 注释：大概的意思就是，等待一小会在尝试修改
 		if oldval == _Gwaiting && gp.atomicstatus == _Grunnable {
 			throw("casgstatus: waiting for Gwaiting but is Grunnable")
 		}
@@ -958,7 +982,7 @@ func casgstatus(gp *g, oldval, newval uint32) {
 		}
 		if nanotime() < nextYield {
 			for x := 0; x < 10 && gp.atomicstatus != oldval; x++ {
-				procyield(1)
+				procyield(1) // 注释：cup暂停一次
 			}
 		} else {
 			osyield()
@@ -2642,11 +2666,11 @@ func gcstopm() {
 // If inheritTime is true, gp inherits the remaining time in the
 // current time slice. Otherwise, it starts a new time slice.
 // Never returns.
-// 注释：译：计划gp在当前M上运行。如果inheritTime为true，则gp将继承当前时间片中的剩余时间。否则，它将启动一个新的时间片。永不回头。
 //
 // Write barriers are allowed because this is called immediately after
 // acquiring a P in several places.
-// 注释：译：写入障碍是允许的，因为这是在几个地方获得P后立即调用的。
+// 注释：译：计划gp在当前M上运行。如果inheritTime为true，则gp将继承当前时间片中的剩余时间。否则，它将启动一个新的时间片。永不回头。
+// 		写入障碍是允许的，因为这是在几个地方获得P后立即调用的。
 //
 // 注释：如果inheritTime是true则立刻执行gp
 //
@@ -3324,8 +3348,7 @@ top:
 		goto top
 	}
 
-	// 注释：找到了g，那就执行g上的任务函数
-	execute(gp, inheritTime)
+	execute(gp, inheritTime) // 注释：找到了g，那就执行g上的任务函数
 }
 
 // dropg removes the association between m and the current goroutine m->curg (gp for short).
@@ -3339,7 +3362,11 @@ top:
 //		调用方还负责安排在适当的时间使用ready重新启动gp。在调用dropg并安排稍后准备gp之后，调用者可以做其他工作，但最终应该调用schedule来重新启动该m上goroutines的调度。
 // 注释：删除当前线程M的G，并把G和M的关系一并删除
 // 注释：删除当前G(可能是G0、业务G)和M的联系
-// 注释：删除当前G
+// 注释：(断开G和M的相互绑定关系)删除当前G
+// 注释：步骤：
+// 		1.获取G
+// 		2.(断开G和M的关系)删除当前线程M对应G和M的关系
+// 		3.(断开M和G的关系)删除当前线程M的G
 func dropg() {
 	_g_ := getg() // 注释：获取当前G
 
@@ -3534,6 +3561,11 @@ func goyield_m(gp *g) {
 }
 
 // Finishes execution of the current goroutine.
+// 注释：译：完成当前goroutine的执行
+// 注释：函数退出执行goexit然后里面执行这个函数
+// 注释：执行函数退出动作，并且执行下一次调度
+// 注释：步骤：
+//		1.用系统栈(g0)执行goexit0函数(goexit0的入参是业务G（汇编代码在tls中获取的）)(永不返回，会执行下一次调度)
 func goexit1() {
 	if raceenabled {
 		racegoend()
@@ -3541,17 +3573,27 @@ func goexit1() {
 	if trace.enabled {
 		traceGoEnd()
 	}
-	mcall(goexit0)
+	mcall(goexit0) // 注释：用系统栈(g0)执行goexit0函数(goexit0的入参是业务G（汇编代码在tls中获取的）)(永不返回，会执行下一次调度)
 }
 
 // goexit continuation on g0.
+// 注释：协成退出时执行该函数
+// 注释：步骤：
+//		1.入参gp是业务G，是在mcall汇编代码中把tls里的G压入栈中，传入到这个参数里
+//		2.这是业务G的状态为_Gdead
+//		3.如果是系统函数调用（runtime包里的函数），则标记调用次数减1
+//		4.清空业务G里的数据
+//		5. (断开G和M的相互绑定关系)删除当前G
+// 		6.把空闲G放到P的本地G队列里
+// 		7.执行下一次系统调度
 func goexit0(gp *g) {
-	_g_ := getg()
+	_g_ := getg() // 注释：获取G
 
-	casgstatus(gp, _Grunning, _Gdead)
-	if isSystemGoroutine(gp, false) {
-		atomic.Xadd(&sched.ngsys, -1)
+	casgstatus(gp, _Grunning, _Gdead) // 注释：(原子操作)设置G的状态从_Grunning设置为_Gdead
+	if isSystemGoroutine(gp, false) { // 注释：是否是系统函数调用（runtime包里的函数）
+		atomic.Xadd(&sched.ngsys, -1) // 注释：标记系统函数调用的次数减1
 	}
+	// 注释：清空业务G里的数据
 	gp.m = nil
 	locked := gp.lockedm != 0
 	gp.lockedm = 0
@@ -3576,7 +3618,7 @@ func goexit0(gp *g) {
 		gp.gcAssistBytes = 0
 	}
 
-	dropg()
+	dropg() // 注释：(断开G和M的相互绑定关系)删除当前G
 
 	if GOARCH == "wasm" { // no threads yet on wasm
 		gfput(_g_.m.p.ptr(), gp)
@@ -3587,7 +3629,7 @@ func goexit0(gp *g) {
 		print("invalid m->lockedInt = ", _g_.m.lockedInt, "\n")
 		throw("internal lockOSThread error")
 	}
-	gfput(_g_.m.p.ptr(), gp)
+	gfput(_g_.m.p.ptr(), gp) // 注释：把空闲G放到P的本地G队列里
 	if locked {
 		// The goroutine may have locked this thread because
 		// it put it in an unusual kernel state. Kill it
@@ -3603,7 +3645,7 @@ func goexit0(gp *g) {
 			_g_.m.lockedExt = 0
 		}
 	}
-	schedule()
+	schedule() // 注释：执行下一次系统调度
 }
 
 // save updates getg().sched to refer to pc and sp so that a following
@@ -4162,23 +4204,39 @@ func malg(stacksize int32) *g {
 // This must be nosplit because this stack layout means there are
 // untypedasm_amd64.s arguments in newproc's argument frame. Stack copies won't
 // be able to adjust them and stack splits won't be able to copy them.
+// 注释：译：用siz字节的参数创建一个运行fn的新g。把它放在等待运行的g的队列中。编译器将go语句转换为对此的调用。
+//		此调用的堆栈布局不同寻常：它假设要传递给fn的参数在堆栈上的顺序紧跟在&fn之后。因此，它们在逻辑上是newproc参数框架的一部分，
+//		尽管它们没有出现在其签名中（而且不能出现，因为它们的类型在调用站点之间不同）。
+//		这必须是非拆分的，因为这个堆栈布局意味着在newproc的参数框架中有untypedasm_amd64.s参数。堆栈副本将无法调整它们，堆栈拆分也无法复制它们。
 // 注释：参数：fn.fn是runtime.main函数指针
-// 注释：参数：siz是初始堆栈大小，一般情况下是0
+// 注释：参数：siz是初始堆栈大小，一般情况下是0，(入口汇编函数（runtime·rt0_go）传入的是0，debug函数有传入参数)
 // 注释：(new procedure)新建G然后把G放到当前P里(所有新建G都是从这里出去的)
+// 注释：把fn组装到G里，然后放到P的G本地队列里，等待唤醒，如果是runtime.main函数则直接唤醒
+// 注释：步骤：
+//		1.收集参数和变量：
+//			a.fn要用协成跑的方法；
+//			b.argp是fn地址向上（高位）移动一个指针，这里siz是0,只有siz>0的时候argp才会被使用；
+//			c.gp就是TLS本地线程存储的地址
+//			d.pc是runtime·rt0_go的PC值（调用当前函数(newproc)的地址(PC)）
+//		2.切换系统栈调用(用g0执行fn函数),系统栈有自己独立的栈空间，就是线程栈空间，每个M下都有个g0
+//			a.实例化新的空闲G
+//			b.获取当前G对应的P
+//			c.把新的G加入本地P的G队列里
+//			d.如果是第一个main函数（runtime.main）则直接唤醒P，执行里的G
 //go:nosplit
 func newproc(siz int32, fn *funcval) {
-	argp := add(unsafe.Pointer(&fn), sys.PtrSize) // 注释：fn向后扩大一个指针大小，存放P时使用（用fn + PtrSize 获取第一个参数的地址，也就是argp）
+	argp := add(unsafe.Pointer(&fn), sys.PtrSize) // 注释：fn地址向上一个指针大小（就是预留fn的参数位置）向后扩大一个指针大小，存放P时使用（用fn + PtrSize 获取第一个参数的地址，也就是argp）
 	gp := getg()                                  // 注释：获取当前TLS数据位置指针（用来存储G的指针的）
 	pc := getcallerpc()                           // 注释：调用当前函数(newproc)的地址(PC)
 	// 注释：用g0的栈创建G对象
-	systemstack(func() { // 注释：切换到系统堆栈（系统堆栈指的就是g0，有独立的8M栈空间，负责调度G）
+	systemstack(func() { // 注释：切换到系统堆栈（系统堆栈指的就是g0，有独立的栈空间，就是系统线程栈空间，负责调度G）
 		newg := newproc1(fn, argp, siz, gp, pc) // 注释：用g0的栈创建G对象（此时已经切换g为g0）
 
 		_p_ := getg().m.p.ptr()  // 注释：获取当前g指向的p地址
 		runqput(_p_, newg, true) // 注释：把新建立的g插入本地队列的尾部，若本地队列已满，插入全局队列
 
-		if mainStarted {
-			wakep()
+		if mainStarted { // 注释：如果是runtime.main函数启动则直接唤醒，runtime.main函数的g.goid是1
+			wakep() // 注释：唤醒P，就是那个M运行P，然后运行P里的G
 		}
 	})
 }
@@ -4190,6 +4248,8 @@ func newproc(siz int32, fn *funcval) {
 //
 // This must run on the system stack because it's the continuation of
 // newproc, which cannot split the stack.
+// 注释：译：在状态_Grunnable中创建一个新的g，从fn开始，参数的narg字节从argp开始。callerrpc是创建它的go语句的地址。调用方负责将新g添加到调度程序中。
+//		这必须在系统堆栈上运行，因为它是newproc的延续，不能拆分堆栈。
 //
 // 注释：参数：fn.fn初始是runtime.main函数指针，后面表示调用方的PC值（例如：方法A里使用go指令生成新的G时，参数fn.fn为A方法的地址PC值）
 // 注释：参数：argp是P的指针；narg是初始堆栈大小，一般情况下是0；
@@ -4197,6 +4257,18 @@ func newproc(siz int32, fn *funcval) {
 // 注释：参数：callergp是调用者的G,例如：A调用B然后执行go指令，此时callerpc是A的PC值，fn.fn是B的PC值，callergp是A对应的G
 // 注释：参数：callerpc是调用者的PC指令,例如：A调用B然后执行go指令，此时callerpc是A的PC值，fn.fn是B的PC值，callergp是A对应的G
 // 注释：建立一个G
+// 注释：步骤：
+//		1.M加锁
+//		2.到本地（P里的）G队列拿出一个空闲G(此时G的状态是 _Gdead)
+//			a.如果没有拿到则创建新的空G
+//			b.设置G状态为 _Gdead
+//			c.把G放到全局G队列里
+//		3.拼装 g.sched 结构体，实际执行的就是这个结构体的G
+//		4.设置G状态从 _Gdead 设置到 _Grunnable
+//		5.(设置 g.goid )到P中的G的ID缓存中拿取一个G的ID，并且设置 g.goid ，设置成功后 p.goidcache++
+//			a.如果缓存已经满了（p.goidcache == p.goidcacheend），则到全局中拿取16个放到缓存里
+//		6.释放M锁并返回新的G
+//
 //go:systemstack
 func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerpc uintptr) *g {
 	// 注释：参数:narg是初始堆栈大小，一般情况下是0；
@@ -4207,7 +4279,7 @@ func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerp
 		throw("go of nil func value")
 	}
 	acquirem()           // 注释：获取M并加锁，这里没有用到返回值，所以是单纯的加锁，禁止被抢占 // disable preemption because it can be holding p in a local var
-	siz := narg          // 注释：初始堆栈大小，一般情况下是0；
+	siz := narg          // 注释：初始堆栈大小，一般情况下是0；(入口汇编函数（runtime·rt0_go）传入的是0，debug函数有传入参数)
 	siz = (siz + 7) &^ 7 // 注释：(永远保证是8的倍数)内存对齐，8位向上取整（最小单位是8位）
 
 	// We could allocate a larger initial stack if necessary.
@@ -4243,7 +4315,7 @@ func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerp
 		prepGoExitFrame(sp)                 // 注释：AMD64架构什么都没有做，只有PPC64架构才触发汇编代码(PPC64架构就是处理LR,因为这个架构没有LR寄存器所以用R2寄存器代用）
 		spArg += sys.MinFrameSize           // 注释：栈基地址参数向上移动，去掉扩展里最小尺寸
 	}
-	if narg > 0 {
+	if narg > 0 { // 注释：narg是初始的参数大小，一般为0，(入口汇编函数（runtime·rt0_go）传入的是0，debug函数有传入参数)，如果大于0则需要把这部分的内存放到实际参数内存中
 		memmove(unsafe.Pointer(spArg), argp, uintptr(narg)) // 注释：(复制堆栈)复制narg个字节,把argp复制到spArg里
 		// This is a stack-to-stack copy. If write barriers
 		// are enabled and the source stack is grey (the
@@ -4251,9 +4323,9 @@ func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerp
 		// barrier copy. We do this *after* the memmove
 		// because the destination stack may have garbage on
 		// it.
-		// 注释：【待标记】
-		if writeBarrier.needed && !_g_.m.curg.gcscandone {
-			f := findfunc(fn.fn)
+		// 注释：译：这是一个堆栈到堆栈的复制。如果启用了写屏障，并且源堆栈为灰色（目标始终为黑色），则执行屏障复制。我们在memmove之后这样做，因为目标堆栈上可能有垃圾。
+		if writeBarrier.needed && !_g_.m.curg.gcscandone { // 注释：需要写屏障，并且GC扫描未结束时
+			f := findfunc(fn.fn) // 注释：【ing】
 			stkmap := (*stackmap)(funcdata(f, _FUNCDATA_ArgsPointerMaps))
 			if stkmap.nbit > 0 {
 				// We're in the prologue, so it's always stack map index 0.
@@ -4263,43 +4335,59 @@ func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerp
 		}
 	}
 
-	// 注释：&newg.sched向后清空newg.sched个字节
-	memclrNoHeapPointers(unsafe.Pointer(&newg.sched), unsafe.Sizeof(newg.sched)) // 注释：清空newg.sched内存数据
+	// 注释：初始化清空sched(&newg.sched向后清空newg.sched个字节),并拼装sched结构体，实际执行的就是这个结构体的G
+	memclrNoHeapPointers(unsafe.Pointer(&newg.sched), unsafe.Sizeof(newg.sched)) // 注释：(初始化清空sched)清空newg.sched内存数据
 	newg.sched.sp = sp                                                           // 注释：(保存现场)保存SP寄存器地址（参数的开始地址）
 	newg.stktopsp = sp                                                           // 注释：(保存现场)录栈基地址，用于追溯
-	newg.sched.pc = funcPC(goexit) + sys.PCQuantum                               // 注释：(保存现场)存PC指令地址 // +PCQuantum so that previous instruction is in same function
-	newg.sched.g = guintptr(unsafe.Pointer(newg))                                // 注释：(保存现场)存当前的G地址
-	gostartcallfn(&newg.sched, fn)                                               // 注释：(保存现场)保存pc和ctxt(记录调用链),fn是调用方的方法指针（PC）, 例如A执行go后fn为A的PC值
-	newg.gopc = callerpc                                                         // 注释：调用者的PC值;例如：A调用B然后执行go指令，此时callerpc是A的PC值，fn.fn是B的PC值，callergp是A对应的G
-	newg.ancestors = saveAncestors(callergp)                                     // 注释：把当前的G的信息保存到调用链上，用于debug追溯时使用
-	newg.startpc = fn.fn
-	if _g_.m.curg != nil {
+	// 注释：这里太巧妙了，内存地址执行指令的顺序是高地址向低地址执行，这里初始化PC是goexit的伪PC加1个内存单位（每种平台内存单位可能不一样），后面会把这个伪PC放到伪SP，然后后面跟上fn的伪PC
+	// 注释：
+	//                    ********************
+	//      caller --->   *       bp         *    <--- (基地址)当前函数的伪SP地址
+	//                    ********************
+	//                    *   return addr    *    <--- 下一个函数的返回位置(通常由LR寄存器存储)
+	//                    ********************
+	//      callee --->   *      fn()        *    <--- 下一个函数的PC
+	//                    ********************
+	// 注释：后面会把这个伪PC放到伪SP，然后后面跟上fn的伪PC就相当于：
+	//        go goexit(){
+	//            fn()
+	//        }()
+	newg.sched.pc = funcPC(goexit) + sys.PCQuantum // 注释：初始化PC指令地址空间(返回后执行goexit),新建的G执行完成后执行这里退出 // +PCQuantum so that previous instruction is in same function
+	newg.sched.g = guintptr(unsafe.Pointer(newg))  // 注释：(保存现场)存当前的G地址
+	gostartcallfn(&newg.sched, fn)                 // 注释：(保存现场)保存pc和ctxt(记录调用链),fn是调用方的方法指针（PC）, 例如A执行go后fn为A的PC值
+	newg.gopc = callerpc                           // 注释：调用者的PC值;例如：A调用B然后执行go指令，此时callerpc是A的PC值，fn.fn是B的PC值，callergp是A对应的G
+	newg.ancestors = saveAncestors(callergp)       // 注释：【ing】把当前的G的信息保存到调用链上，用于debug追溯时使用
+	newg.startpc = fn.fn                           // 注释：(go fn()中fn指令对应的pc值)要调用方法的PC
+	if _g_.m.curg != nil {                         // 注释：如果线程M正在运行G存在时
 		newg.labels = _g_.m.curg.labels // 注释：如果线程M正在运行G存在时，同步探测器标签
 	}
-	if isSystemGoroutine(newg, false) {
-		atomic.Xadd(&sched.ngsys, +1)
+	if isSystemGoroutine(newg, false) { // 注释：是否是系统函数调用（runtime包里的函数）
+		atomic.Xadd(&sched.ngsys, +1) // 注释：标记系统函数调用的次数
 	}
-	casgstatus(newg, _Gdead, _Grunnable)
+	casgstatus(newg, _Gdead, _Grunnable) // 注释：设置G状态为_Grunnable
 
-	if _p_.goidcache == _p_.goidcacheend {
+	// 注释：到P中G的ID缓存中拿一个G的ID
+	if _p_.goidcache == _p_.goidcacheend { // 注释：如果缓存的开始和结束相等，表示没有缓存了，需要到全局中拿取16个ID缓存起来
 		// Sched.goidgen is the last allocated id,
 		// this batch must be [sched.goidgen+1, sched.goidgen+GoidCacheBatch].
 		// At startup sched.goidgen=0, so main goroutine receives goid=1.
-		_p_.goidcache = atomic.Xadd64(&sched.goidgen, _GoidCacheBatch)
-		_p_.goidcache -= _GoidCacheBatch - 1
-		_p_.goidcacheend = _p_.goidcache + _GoidCacheBatch
+		// 注释：译：Schedule.goidgen是最后一个分配的id，此批处理必须是[Sched.goidgen+1，Sched.goidgen+GoidCacheBatch]之间。
+		//		在启动时，Sched.giodgen=0，因此主goroutine接收到goid=1。
+		_p_.goidcache = atomic.Xadd64(&sched.goidgen, _GoidCacheBatch) // 注释：到全局中拿16个缓存到P里
+		_p_.goidcache -= _GoidCacheBatch - 1                           // 注释：设置缓存的开始位置数
+		_p_.goidcacheend = _p_.goidcache + _GoidCacheBatch             // 注释：设置缓存的结束位置数（G的ID<该字段）
 	}
-	newg.goid = int64(_p_.goidcache)
-	_p_.goidcache++
+	newg.goid = int64(_p_.goidcache) // 注释：设置G的ID
+	_p_.goidcache++                  // 注释：下一个空G的ID加1
 	if raceenabled {
 		newg.racectx = racegostart(callerpc)
 	}
 	if trace.enabled {
 		traceGoCreate(newg, newg.startpc)
 	}
-	releasem(_g_.m)
+	releasem(_g_.m) // 注释：释放M锁
 
-	return newg
+	return newg // 注释：返回新的G
 }
 
 // saveAncestors copies previous ancestors of the given caller g and
@@ -4338,7 +4426,20 @@ func saveAncestors(callergp *g) *[]ancestorInfo {
 
 // Put on gfree list.
 // If local list is too long, transfer a batch to the global list.
+// 注释：译：列入gfree list里。如果本地列表太长，请将一个批转移到全局列表。
 // 注释：空G放到本地P空G队列里，如果到达64个时，拿出一半放到全局空G队列里
+// 注释：步骤：
+//		1.获取栈大小
+//		2.如果栈空间不是固定大小（不同系统固定大小不同，Linux是2048），释放栈空间，并清空栈的高地址、底地址、爆栈地址
+//		3.把G放到本地队列里(P的G队列)
+//		4.本地空闲G数量加1
+//		5.如果本地空闲G数量>=64
+//			a.(加锁)获取全局空闲G队列锁
+//			b.拿出一半（32个）放到全局空闲G队列里
+//			c.如果G无栈空间，放到【无栈空间】【全局空G队列】里
+//			d.如果G有栈空间，放到【有栈空间】【全局空G队列】里
+//			e.全局空G队列个数加1
+//			f.(解锁)释放全局空闲G队列锁
 func gfput(_p_ *p, gp *g) {
 	if readgstatus(gp) != _Gdead {
 		throw("gfput: bad status (not Gdead)")
@@ -4358,24 +4459,37 @@ func gfput(_p_ *p, gp *g) {
 	_p_.gFree.push(gp)     // 注释：把空G放到本地空队列里
 	_p_.gFree.n++          // 注释：本地空队列计数加1
 	if _p_.gFree.n >= 64 { // 注释：如果本地队列个数到达64个时，拿出一半放到全局空队列里
-		lock(&sched.gFree.lock) // 注释：锁定全局空G队列
+		lock(&sched.gFree.lock) // 注释：(加锁)锁定全局空G队列(获取全局空闲G队列锁)
 		for _p_.gFree.n >= 32 { // 注释：拿出32个放到全局空G队列里
 			_p_.gFree.n--         // 注释：本地空G个数减1
 			gp = _p_.gFree.pop()  // 注释：在本地空G队列中拿出一个空G
-			if gp.stack.lo == 0 { // 注释：如果G没有栈顶（没有栈空间）则放到全局空G队列sched.gFree.noStack里
-				sched.gFree.noStack.push(gp)
-			} else {
-				sched.gFree.stack.push(gp) // 注释：如果G有栈顶（有栈空间）则放到全局空G队列sched.gFree.stack里
+			if gp.stack.lo == 0 { // 注释：如果G没有栈顶（没有栈空间）则放到全局空G无栈空间队列 schedt.gFree.noStack 里
+				sched.gFree.noStack.push(gp) // 注释：放到全局空G无栈空间队列里
+			} else { // 注释：如果G有栈顶（有栈空间）则放到全局空G有栈空间队列sched.gFree.stack里
+				sched.gFree.stack.push(gp) // 注释：放到全局空G有栈空间队列里
 			}
 			sched.gFree.n++ // 注释：全局空G队列个数加1
 		}
-		unlock(&sched.gFree.lock) // 注释：全局空G队列解锁
+		unlock(&sched.gFree.lock) // 注释：(解锁)全局空G队列解锁(释放全局空闲G队列锁)
 	}
 }
 
 // Get from gfree list.
 // If local list is empty, grab a batch from global list.
+// 注释：译：从gfree列表中获取。如果本地列表为空，请从全局列表中获取一个批。
 // 注释：获取空G：从gfree列表中获取。如果本地列表为空，从全局列表中获取一批
+// 注释：步骤：
+//		1.如果本地P里没有空闲G && 全局里有空闲G（包括有栈空间和无栈空间）
+//			a.(加锁)
+//			b.从全局里拿出32个（本地空闲G队列的一半）放到本地空闲G队列里
+//				(1).(全局出栈)先去全局有栈空间的空闲栈里拿，如果没有则去全局无栈空间里拿，如果还没有则直接返回
+//				(2).拿完以后全局空闲G列表计数器减去1
+//				(3).(本地入栈)从头部加入本地链表
+//			f.(解锁)
+//		2.从本地出栈一个空闲G，如果没有则直接返回
+//		3.本地空闲G计数器减去1
+//		4.如果没有栈空间则申请栈空间
+//		5.返回空闲G
 func gfget(_p_ *p) *g {
 retry:
 	// 注释：判断本地P空G队列是否有值，如果为空并且全局空G队里里有值时，把全局空G队列里的空G拿出一半(32个)放到本地P空G队列里，然后跳到retry处重新执行
@@ -4396,7 +4510,7 @@ retry:
 			_p_.gFree.n++      // 注释：本地队列计数加1
 		}
 		unlock(&sched.gFree.lock) // 注释：全局空G解锁
-		goto retry                // 注释：跳到retry从新执行
+		goto retry                // 注释：跳到retry从新执行(其实这里不用重试就可以，即便重试也无法进入本if语句中，所以无需重试)
 	}
 	gp := _p_.gFree.pop() // 注释：到本地P中取出一个空G，如果没有取到则退出
 	if gp == nil {
@@ -4421,7 +4535,17 @@ retry:
 }
 
 // Purge all cached G's from gfree list to the global list.
+// 注释：译：将所有缓存的G从gfree列表中清除到全局列表中。
 // 注释：(清空本地P的空G队列)把本地P上空G放到全局空G的链表里，把有栈空间的空G放到sched.gFree.stack里，把没有栈空间的空G放到sched.gFree.noStack里
+// 注释：步骤：
+//		1.加锁
+//		2.遍历本地空闲G列表
+//			a.本地空闲G出栈
+//			b.本地空闲G计数器减去1
+//			c.如果无栈空间，则入栈到全局无栈空间链表里
+//			b.如果有栈空间，则入栈到全局有占空间链表里
+//			b.全局空闲G链表计数器加1
+//		3.解锁
 func gfpurge(_p_ *p) {
 	lock(&sched.gFree.lock)  // 注释：全局空G链表锁：修改前上锁
 	for !_p_.gFree.empty() { // 注释：如果局部空G有数据时
@@ -4546,10 +4670,16 @@ func badunlockosthread() {
 	throw("runtime: internal error: misuse of lockOSThread/unlockOSThread")
 }
 
+// 注释：统计已使用G的个数
+// 注释：步骤：
+//		1.全局业务G个数(已使用的) = 获取全部G点个数 - 全局空闲G个数 - 系统G个数
+//		2.所有业务G个数(已使用的) = 遍历所有P，减去P里空闲的G个数
+//		3.如果数量小于1则设置为1，并返回
 func gcount() int32 {
+	// 注释：全局业务G个数(已使用的) = 获取全部G点个数 - 全局空闲G个数 - 系统G个数
 	n := int32(atomic.Loaduintptr(&allglen)) - sched.gFree.n - int32(atomic.Load(&sched.ngsys))
-	for _, _p_ := range allp {
-		n -= _p_.gFree.n
+	for _, _p_ := range allp { // 注释：遍历所有P，减去P里空闲的G个数
+		n -= _p_.gFree.n // 注释：减去P里空闲的G个数
 	}
 
 	// All these variables can be changed concurrently, so the result can be inconsistent.
@@ -4560,8 +4690,9 @@ func gcount() int32 {
 	return n
 }
 
+// 注释：所有已使用的M的数量
 func mcount() int32 {
-	return int32(sched.mnext - sched.nmfreed)
+	return int32(sched.mnext - sched.nmfreed) // 注释：所有已使用的M的数量 = 下一个空M的ID - 已经释放的M数量
 }
 
 var prof struct {
@@ -5321,8 +5452,9 @@ func checkdead() {
 var forcegcperiod int64 = 2 * 60 * 1e9
 
 // Always runs without a P, so write barriers are not allowed.
+// 注释：译：总是在没有P的情况下运行，因此不允许出现写障碍。
 //
-// 注释：系统监控（system monitor）
+// 注释：系统监控（system monitor）【ing】
 //go:nowritebarrierrec
 func sysmon() {
 	lock(&sched.lock)
@@ -6298,7 +6430,7 @@ func (q *gQueue) popList() gList {
 // on one gQueue or gList at a time.
 // 注释：G队列结构体
 type gList struct {
-	head guintptr
+	head guintptr // 注释：（G列表的头部G指针）head是G的指针
 }
 
 // empty reports whether l is empty.
@@ -6321,10 +6453,12 @@ func (l *gList) pushAll(q gQueue) {
 }
 
 // pop removes and returns the head of l. If l is empty, it returns nil.
+// 注释：译：pop移除并返回l的头。如果l为空，则返回nil。
+// 注释：(出栈)从头部移出1个G
 func (l *gList) pop() *g {
-	gp := l.head.ptr()
-	if gp != nil {
-		l.head = gp.schedlink
+	gp := l.head.ptr() // 注释：g列表头指针
+	if gp != nil {     // 注释：如果存在则，从头部移出一个G。否则直接返回nil
+		l.head = gp.schedlink // 注释：从头部移出一个G
 	}
 	return gp
 }

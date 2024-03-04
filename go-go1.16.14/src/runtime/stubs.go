@@ -45,6 +45,11 @@ func getg() *g
 // 注释：译：这一定不能去：noescape：如果fn是一个堆栈分配的闭包，fn将g放在运行队列中，并且g在fn返回之前执行，则闭包在执行时将无效。
 //
 // 注释：保存现场; 汇编函数是：TEXT runtime·mcall(SB), NOSPLIT, $0-8
+// 注释：每个M下都会保存一个g0，是自己独立的栈空间(系统线程栈空间)。
+// 注释：步骤：
+//      1.保存现场
+//      2.切换g0
+//      3.执行fn，用g0执行fn
 func mcall(fn func(*g))
 
 // systemstack runs fn on a system stack.
@@ -57,6 +62,9 @@ func mcall(fn func(*g))
 // It is common to use a func literal as the argument, in order
 // to share inputs and outputs with the code around the call
 // to system stack:
+// 注释：译：systemstack在系统堆栈上运行fn。如果从每个操作系统线程（g0）堆栈调用systemstack，或者从信号处理（gsignal）堆栈调用system stack，
+//		则systemstack直接调用fn并返回。否则，将从普通goroutine的有限堆栈调用systemstack。在这种情况下，systemstack切换到每个操作系统线程堆栈，
+//		调用fn，然后切换回来。通常使用func文字作为参数，以便与系统堆栈调用周围的代码共享输入和输出：
 //
 //	... set up y ...
 //	systemstack(func() {
@@ -64,7 +72,7 @@ func mcall(fn func(*g))
 //	})
 //	... use x ...
 //
-// 注释：切换到系统堆栈（系统堆栈指的就是g0，有独立的8M栈空间，负责调度G），汇编位置：TEXT runtime·systemstack(SB), NOSPLIT, $0-8
+// 注释：切换到系统堆栈（系统堆栈指的就是g0，有独立的栈空间，就是线程栈空间，负责调度G），汇编位置：TEXT runtime·systemstack(SB), NOSPLIT, $0-8
 //
 //go:noescape
 func systemstack(fn func()) // 注释：切换系统栈执行
@@ -217,7 +225,7 @@ func breakpoint()
 // 注释：这里会调用d.fn函数，就是refer里执行的函数
 func reflectcall(argtype *_type, fn, arg unsafe.Pointer, argsize uint32, retoffset uint32)
 
-func procyield(cycles uint32)
+func procyield(cycles uint32) // 注释：循环执行PAUSE系统指令，循环次数是第一个参数，CPU暂停，此时不会被CPU切片抢占(该指令只会占用CPU并消耗CPU时间)
 
 type neverCallThisFunction struct{}
 
@@ -231,6 +239,9 @@ type neverCallThisFunction struct{}
 // gentraceback assumes that goexit terminates the stack. A direct
 // call on the stack will cause gentraceback to stop walking the stack
 // prematurely and if there is leftover state it may panic.
+// 注释：译：goexit是每个goroutine调用堆栈顶部的返回存根。每个goroutine堆栈都被构造为goexit调用了goroutine的入口点函数，因此当入口点函数返回时，它将返回到goexit，
+//		后者将调用goexit1来执行实际退出。
+//		决不能直接调用此函数。请改为调用goexit1。gentraceback假设goexit终止堆栈。对堆栈的直接调用将导致gentraceback过早地停止遍历堆栈，如果存在剩余状态，它可能会死机。
 func goexit(neverCallThisFunction)
 
 // publicationBarrier performs a store/store barrier (a "publication"
@@ -248,15 +259,20 @@ func goexit(neverCallThisFunction)
 // side naturally has a data dependency order. All architectures that
 // Go supports or seems likely to ever support automatically enforce
 // data dependency ordering.
+// 注释：译：publicationBarrier执行存储/存储屏障（“发布”或“导出”屏障）。在初始化一个对象和使另一个处理器可以访问该对象之间需要某种形式的同步。
+//		如果没有同步，初始化写入和“发布”写入可能会被重新排序，从而允许其他处理器跟随指针并观察未初始化的对象。通常，应该使用更高级别的同步，
+//		例如锁定或原子指针写入。publicationBarrier适用于无法选择的情况，例如在内存管理器的实现中。
+//
+//		读取端没有相应的障碍，因为读取端自然具有数据依赖顺序。Go支持或可能支持的所有体系结构都会自动强制执行数据依赖性排序。
 func publicationBarrier()
 
 // getcallerpc returns the program counter (PC) of its caller's caller.
-// 注释：getcallerrpc返回其调用者的程序计数器（PC）。
 // getcallersp returns the stack pointer (SP) of its caller's caller.
-// 注释：getcallersp返回其调用者的调用者的堆栈指针（SP）。
 // The implementation may be a compiler intrinsic; there is not
 // necessarily code implementing this on every platform.
-// 注释：该实现可以是编译器内部的；不一定有代码在每个平台上实现这一点。
+// 注释：译：getcallerrpc返回其调用者的程序计数器（PC）。
+// 		getcallersp返回其调用者的调用者的堆栈指针（SP）。
+// 		该实现可以是编译器内部的；不一定有代码在每个平台上实现这一点。
 //
 // For example:
 //
@@ -267,20 +283,20 @@ func publicationBarrier()
 //
 // These two lines find the PC and SP immediately following
 // the call to f (where f will return).
-// 注释：这两行在调用f（f将返回）之后立即找到PC和SP。
 //
 // The call to getcallerpc and getcallersp must be done in the
 // frame being asked about.
-// 注释：对getcallerrpc和getcallersp的调用必须在被询问的帧中完成。
 //
 // The result of getcallersp is correct at the time of the return,
 // but it may be invalidated by any subsequent call to a function
 // that might relocate the stack in order to grow or shrink it.
-// 注释：getcallersp的结果在返回时是正确的，但它可能会因随后对函数的任何调用而无效，该函数可能会重新定位堆栈以扩大或缩小堆栈。
 // A general rule is that the result of getcallersp should be used
 // immediately and can only be passed to nosplit functions.
-// 注释：一般规则是，getcallersp的结果应该立即使用，并且只能传递给nosplit函数
-
+// 注释：译：这两行在调用f（f将返回）之后立即找到PC和SP。
+// 		对getcallerrpc和getcallersp的调用必须在被询问的帧中完成。
+// 		getcallersp的结果在返回时是正确的，但它可能会因随后对函数的任何调用而无效，该函数可能会重新定位堆栈以扩大或缩小堆栈。
+// 		一般规则是，getcallersp的结果应该立即使用，并且只能传递给nosplit函数
+//
 // 注释：返回对所在函数的调用，上面案例中有解释
 // 注释：获取 caller(呼叫者，上游的函数)的PC（伪）指令寄存器，对应硬件IP寄存器
 //

@@ -48,10 +48,10 @@ func LoadAcquintptr(ptr *uintptr) uintptr {
 }
 
 //go:noescape
-func Xadd(ptr *uint32, delta int32) uint32
+func Xadd(ptr *uint32, delta int32) uint32 // 注释：(原子操作)把参数delta加到参数ptr对应的指针里里并且返回参数ptr的旧值
 
 //go:noescape
-func Xadd64(ptr *uint64, delta int64) uint64 // 注释：(原子操作)把参数2加到参数1对应的指针里里并且返回参数2
+func Xadd64(ptr *uint64, delta int64) uint64 // 注释：(原子操作)把参数delta加到参数ptr对应的指针里里并且返回参数ptr的旧值
 
 //go:noescape
 func Xadduintptr(ptr *uintptr, delta uintptr) uintptr
@@ -75,7 +75,7 @@ func Load8(ptr *uint8) uint8 {
 func And8(ptr *uint8, val uint8)
 
 //go:noescape
-func Or8(ptr *uint8, val uint8)
+func Or8(ptr *uint8, val uint8) // 注释：原子或操作：ptr |= val
 
 //go:noescape
 func And(ptr *uint32, val uint32)
